@@ -7,6 +7,7 @@ import {
   Brain,
   CalendarDays,
   Check,
+  ChevronLeft,
   ChevronRight,
   Clock3,
   Compass,
@@ -18,11 +19,23 @@ import {
   Plus,
   Printer,
   ShieldCheck,
+  SlidersHorizontal,
+  Sparkles,
   Sun,
   Target,
+  TrendingUp,
   ThumbsUp,
   X,
+  AlertTriangle,
+  Play,
+  Pause,
+  RotateCcw,
+  Layers,
+  Eye,
+  Split,
 } from 'lucide-react';
+import { simulateRoutineApi, profileHabitApi } from './lib/api';
+import { buildDayEvents, compareTwoDays, minuteToTimeString } from './lib/timeline';
 import {
   CartesianGrid,
   Legend,
@@ -53,9 +66,11 @@ import { loadAppData, restoreDemoData, saveAppData } from './lib/storage';
 import type {
   AppData,
   AppPage,
+  ArchetypeSummary,
   DataMode,
   DailyActivity,
   MoodCheckIn,
+  RoutineSimulationResponse,
   RecommendationFeedback,
   StressContributor,
   ThemePreference,
@@ -64,6 +79,8 @@ import type {
 
 const navItems: Array<{ id: AppPage; label: string; icon: typeof LayoutDashboard }> = [
   { id: 'overview', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'doppelganger', label: 'Behaviour replay', icon: Play },
+  { id: 'simulator', label: 'Routine simulator', icon: SlidersHorizontal },
   { id: 'checkin', label: 'Daily check-in', icon: Heart },
   { id: 'activity', label: 'Activity tracking', icon: Activity },
   { id: 'insights', label: 'Behavior patterns', icon: Brain },
@@ -79,6 +96,14 @@ const pageCopy: Record<AppPage, { title: string; description: string }> = {
   overview: {
     title: 'Your patterns, at a glance',
     description: 'Understand your digital habits. Recognize stress patterns. Build healthier routines.',
+  },
+  doppelganger: {
+    title: 'Digital Doppelgänger — Your Behaviour, Replayed',
+    description: 'Reconstruct and replay your recorded digital habits and self-reported check-ins across a 24-hour timeline.',
+  },
+  simulator: {
+    title: 'What-if routine simulator',
+    description: 'Adjust your daily digital routine and forecast predicted productivity scores and habit archetypes using machine learning.',
   },
   checkin: {
     title: 'Make space to check in',
@@ -375,6 +400,128 @@ function App() {
   const [goalError, setGoalError] = useState('');
   const today = localDateKey();
 
+  // What-If Routine Simulator & Habit Profiling state
+  const [simScreenTime, setSimScreenTime] = useState<number>(7.5);
+  const [simWorkStudy, setSimWorkStudy] = useState<number>(4.5);
+  const [simSocialMedia, setSimSocialMedia] = useState<number>(1.2);
+  const [simEntertainment, setSimEntertainment] = useState<number>(1.0);
+  const [simLateNight, setSimLateNight] = useState<number>(0.8);
+  const [simBreaks, setSimBreaks] = useState<number>(5);
+  const [simBreakDuration, setSimBreakDuration] = useState<number>(15);
+  const [simResult, setSimResult] = useState<RoutineSimulationResponse | null>(null);
+  const [isSimulating, setIsSimulating] = useState<boolean>(false);
+  const [simError, setSimError] = useState<string | null>(null);
+  const [currentArchetype, setCurrentArchetype] = useState<ArchetypeSummary | null>(null);
+
+  const handleSimulateBehaviour = async (customParams?: {
+    screen?: number;
+    work?: number;
+    social?: number;
+    ent?: number;
+    late?: number;
+    breaks?: number;
+    dur?: number;
+  }) => {
+    if (isSimulating) return;
+
+    const screen = customParams?.screen ?? simScreenTime;
+    const work = customParams?.work ?? simWorkStudy;
+    const social = customParams?.social ?? simSocialMedia;
+    const ent = customParams?.ent ?? simEntertainment;
+    const late = customParams?.late ?? simLateNight;
+    const breaks = customParams?.breaks ?? simBreaks;
+    const dur = customParams?.dur ?? simBreakDuration;
+
+    // Validate inputs
+    if (!Number.isFinite(screen) || screen <= 0 || screen > 24) {
+      setSimError('Total screen time must be between 0.5 and 24 hours.');
+      return;
+    }
+    if (work < 0 || work > screen) {
+      setSimError('Active work/study hours cannot exceed total screen time.');
+      return;
+    }
+    if (late < 0 || late > screen) {
+      setSimError('Late-night screen use cannot exceed total screen time.');
+      return;
+    }
+    if (breaks < 0 || breaks > 50) {
+      setSimError('Break count must be between 0 and 50.');
+      return;
+    }
+    if (dur < 0 || dur > 120) {
+      setSimError('Break duration must be between 1 and 120 minutes.');
+      return;
+    }
+
+    setSimError(null);
+    setIsSimulating(true);
+
+    try {
+      const res = await simulateRoutineApi({
+        totalScreenTime: screen,
+        workStudyHours: work,
+        socialMediaHours: social,
+        entertainmentHours: ent,
+        lateNightUsage: late,
+        breaks: breaks,
+        averageBreakMinutes: dur,
+      });
+      setSimResult(res);
+    } catch (err) {
+      setSimError(err instanceof Error ? err.message : 'Simulation failed.');
+    } finally {
+      setIsSimulating(false);
+    }
+  };
+
+  useEffect(() => {
+    let active = true;
+    simulateRoutineApi({
+      totalScreenTime: 7.5,
+      workStudyHours: 4.5,
+      socialMediaHours: 1.2,
+      entertainmentHours: 1.0,
+      lateNightUsage: 0.8,
+      breaks: 5,
+      averageBreakMinutes: 15,
+    }).then((res) => {
+      if (active) setSimResult(res);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, []);
+
+  // Digital Doppelgänger (Behaviour Replay) state
+  const [replayDate, setReplayDate] = useState<string>(today);
+  const [compareDate, setCompareDate] = useState<string>('');
+  const [replayMode, setReplayMode] = useState<'single' | 'compare'>('single');
+  const [currentMinute, setCurrentMinute] = useState<number>(1439);
+  const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [playbackSpeed, setPlaybackSpeed] = useState<number>(2);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [overlays, setOverlays] = useState<{ mood: boolean; stress: boolean; energy: boolean; fatigue: boolean }>({
+    mood: true,
+    stress: true,
+    energy: false,
+    fatigue: false,
+  });
+
+  useEffect(() => {
+    if (!isPlaying) return undefined;
+    const intervalTime = 60;
+    const minuteStep = Math.max(1, Math.round(playbackSpeed * 3));
+    const timer = window.setInterval(() => {
+      setCurrentMinute((prev) => {
+        if (prev >= 1439) {
+          setIsPlaying(false);
+          return 1439;
+        }
+        return Math.min(1439, prev + minuteStep);
+      });
+    }, intervalTime);
+    return () => window.clearInterval(timer);
+  }, [isPlaying, playbackSpeed]);
+
   useEffect(() => {
     document.documentElement.dataset.theme = data.preferences.theme;
     document.querySelector('meta[name="theme-color"]')?.setAttribute(
@@ -400,6 +547,25 @@ function App() {
   );
   const orderedActivities = useMemo(() => sortActivities(visibleActivities), [visibleActivities]);
   const orderedCheckIns = useMemo(() => sortCheckIns(visibleCheckIns), [visibleCheckIns]);
+
+  useEffect(() => {
+    let active = true;
+    const latest = orderedActivities.at(-1);
+    if (!latest) return;
+
+    profileHabitApi({
+      totalScreenTime: latest.totalScreenTime,
+      workStudyHours: latest.workStudyHours ?? (latest.totalScreenTime * 0.5),
+      socialMediaHours: latest.socialMediaHours ?? 1.0,
+      entertainmentHours: latest.entertainmentHours ?? 1.0,
+      lateNightUsage: latest.lateNightUsage ?? 0.5,
+      breaks: latest.breaks ?? 4,
+      averageBreakMinutes: latest.averageBreakMinutes ?? 15,
+    }).then((arch) => {
+      if (active) setCurrentArchetype(arch);
+    }).catch(() => {});
+    return () => { active = false; };
+  }, [orderedActivities]);
   const allSummaries = useMemo(
     () => buildDailySummaries(visibleActivities, visibleCheckIns),
     [visibleActivities, visibleCheckIns],
@@ -827,12 +993,37 @@ function App() {
             note={todaySummary?.activity?.breaks === undefined ? 'No break count recorded' : 'Self-reported daily total'} icon={Check} accent="teal" />
         </div>
 
+        {currentArchetype && (
+          <div className={`archetype-box ${currentArchetype.is_routine_drift ? 'drift' : ''}`} style={{ marginBottom: 20 }}>
+            <div className="archetype-title">
+              <span style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                <Sparkles size={17} color="var(--teal)" />
+                Habit Profile Archetype: <strong>{currentArchetype.archetype_name}</strong>
+              </span>
+              {currentArchetype.is_routine_drift ? (
+                <span className="drift-badge"><AlertTriangle size={12} style={{ marginRight: 4, verticalAlign: -1 }} /> Routine Drift Detected</span>
+              ) : (
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>Baseline Cluster #{currentArchetype.cluster_id + 1}</span>
+              )}
+            </div>
+            <p className="archetype-desc">{currentArchetype.description}</p>
+            <div style={{ marginTop: 8, display: 'flex', flexWrap: 'wrap', gap: 16, fontSize: 12, color: 'var(--text-muted)', alignItems: 'center' }}>
+              <span>Cluster avg screen: <strong>{currentArchetype.cluster_benchmark_averages.Total_Screen_Time_Hrs}h</strong></span>
+              <span>Cluster avg work: <strong>{currentArchetype.cluster_benchmark_averages.Active_Work_Hrs}h</strong></span>
+              <span>Benchmarked output: <strong>{currentArchetype.cluster_benchmark_averages.Productivity_Score_100}%</strong></span>
+              <button className="text-button" style={{ marginLeft: 'auto' }} onClick={goToAction('simulator')}>
+                Simulate routine changes <ChevronRight size={13} />
+              </button>
+            </div>
+          </div>
+        )}
+
         <div className="dashboard-grid chart-grid">
           <Panel className="chart-panel chart-wide" eyebrow="Digital activity" title="Screen time over time"
             action={<span className="chart-unit">Hours per day</span>}>
             {chartData.some((item) => item.screenTime !== null) ? (
               <div className="chart-container">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height={216}>
                   <LineChart data={chartData} margin={{ top: 8, right: 10, bottom: 2, left: -16 }}>
                     <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
                     <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} minTickGap={22} />
@@ -850,7 +1041,7 @@ function App() {
             action={<span className="chart-unit">Scale of 1–5</span>}>
             {chartData.some((item) => item.mood !== null || item.stress !== null || item.fatigue !== null) ? (
               <div className="chart-container">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height={216}>
                   <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 2, left: -20 }}>
                     <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
                     <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} minTickGap={18} />
@@ -871,7 +1062,7 @@ function App() {
             action={<span className="chart-unit">Count per day</span>}>
             {chartData.some((item) => item.breaks !== null) ? (
               <div className="chart-container">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height={216}>
                   <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 2, left: -18 }}>
                     <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
                     <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} minTickGap={18} />
@@ -889,7 +1080,7 @@ function App() {
             action={<span className="chart-unit">Hours per day</span>}>
             {chartData.some((item) => item.lateNight !== null) ? (
               <div className="chart-container">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height={216}>
                   <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 2, left: -18 }}>
                     <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
                     <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} minTickGap={18} />
@@ -907,7 +1098,7 @@ function App() {
             action={<span className="chart-unit">Self-reported count</span>}>
             {chartData.some((item) => item.tasks !== null) ? (
               <div className="chart-container">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height={216}>
                   <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 2, left: -18 }}>
                     <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
                     <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} minTickGap={18} />
@@ -1603,7 +1794,7 @@ function App() {
             action={<span className="chart-unit">Hours per day</span>}>
             {historyChartData.some((item) => item.screenTime !== null) ? (
               <div className="chart-container">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height={185}>
                   <LineChart data={historyChartData} margin={{ top: 8, right: 8, bottom: 2, left: -18 }}>
                     <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
                     <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} minTickGap={18} />
@@ -1618,9 +1809,10 @@ function App() {
           </Panel>
           <Panel className="chart-panel" eyebrow="Historical check-ins" title="Mood, stress & fatigue"
             action={<span className="chart-unit">Scale of 1–5</span>}>
+
             {historyChartData.some((item) => item.mood !== null || item.stress !== null || item.fatigue !== null) ? (
               <div className="chart-container">
-                <ResponsiveContainer width="100%" height="100%">
+                <ResponsiveContainer width="100%" height={185}>
                   <LineChart data={historyChartData} margin={{ top: 8, right: 8, bottom: 2, left: -20 }}>
                     <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
                     <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} minTickGap={18} />
@@ -1755,8 +1947,709 @@ function App() {
     </>
   );
 
+  const renderSimulator = () => {
+    const applyPreset = (screen: number, work: number, social: number, ent: number, late: number, breaks: number, dur: number) => {
+      setSimScreenTime(screen);
+      setSimWorkStudy(work);
+      setSimSocialMedia(social);
+      setSimEntertainment(ent);
+      setSimLateNight(late);
+      setSimBreaks(breaks);
+      setSimBreakDuration(dur);
+      handleSimulateBehaviour({ screen, work, social, ent, late, breaks, dur });
+    };
+
+    return (
+      <>
+        <PageHeading page="simulator">
+          <div className="preset-bar">
+            <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)', alignSelf: 'center', marginRight: 4 }}>
+              Presets:
+            </span>
+            <button type="button" className="preset-button" onClick={() => applyPreset(8.5, 6.0, 0.8, 0.8, 0.2, 7, 20)}>
+              ⚡ Deep Focus Sprint
+            </button>
+            <button type="button" className="preset-button" onClick={() => applyPreset(9.5, 4.0, 1.5, 1.2, 3.8, 2, 10)}>
+              ⚠️ Late-Night Crunch Drift
+            </button>
+            <button type="button" className="preset-button" onClick={() => applyPreset(5.0, 3.0, 0.8, 0.8, 0.2, 6, 20)}>
+              🌿 Balanced Rest Routine
+            </button>
+            <button type="button" className="preset-button" onClick={() => applyPreset(8.0, 2.5, 2.8, 2.2, 1.4, 4, 15)}>
+              📱 High Screen Leisure
+            </button>
+          </div>
+        </PageHeading>
+
+        <div className="simulator-layout">
+          <Panel eyebrow="Adjust routine parameters" title="Digital habit levers">
+            <div className="simulator-controls">
+              <div className="slider-group">
+                <div className="slider-header">
+                  <span>Total Screen Time</span>
+                  <span className="slider-val">{simScreenTime.toFixed(1)} hrs</span>
+                </div>
+                <input
+                  type="range"
+                  min="1"
+                  max="14"
+                  step="0.5"
+                  className="range-input"
+                  aria-label="Total Screen Time in hours"
+                  value={simScreenTime}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    setSimScreenTime(val);
+                    if (simWorkStudy > val) setSimWorkStudy(val);
+                    if (simLateNight > val) setSimLateNight(Math.min(simLateNight, val));
+                  }}
+                />
+              </div>
+
+              <div className="slider-group">
+                <div className="slider-header">
+                  <span>Active Work / Study</span>
+                  <span className="slider-val">{simWorkStudy.toFixed(1)} hrs</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max={simScreenTime}
+                  step="0.5"
+                  className="range-input"
+                  aria-label="Active Work or Study in hours"
+                  value={simWorkStudy}
+                  onChange={(e) => setSimWorkStudy(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="slider-group">
+                <div className="slider-header">
+                  <span>Late-Night Screen Use</span>
+                  <span className="slider-val">{simLateNight.toFixed(1)} hrs</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max={Math.min(6, simScreenTime)}
+                  step="0.2"
+                  className="range-input"
+                  aria-label="Late-night screen use in hours"
+                  value={simLateNight}
+                  onChange={(e) => setSimLateNight(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="slider-group">
+                <div className="slider-header">
+                  <span>Social Media & Entertainment</span>
+                  <span className="slider-val">{(simSocialMedia + simEntertainment).toFixed(1)} hrs</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="8"
+                  step="0.2"
+                  className="range-input"
+                  aria-label="Social media and entertainment in hours"
+                  value={simSocialMedia + simEntertainment}
+                  onChange={(e) => {
+                    const combined = Number(e.target.value);
+                    setSimSocialMedia(Math.round((combined * 0.5) * 10) / 10);
+                    setSimEntertainment(Math.round((combined * 0.5) * 10) / 10);
+                  }}
+                />
+              </div>
+
+              <div className="slider-group">
+                <div className="slider-header">
+                  <span>Daily Breaks Taken</span>
+                  <span className="slider-val">{simBreaks} breaks</span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="12"
+                  step="1"
+                  className="range-input"
+                  aria-label="Daily breaks count"
+                  value={simBreaks}
+                  onChange={(e) => setSimBreaks(Number(e.target.value))}
+                />
+              </div>
+
+              <div className="slider-group">
+                <div className="slider-header">
+                  <span>Average Break Duration</span>
+                  <span className="slider-val">{simBreakDuration} mins</span>
+                </div>
+                <input
+                  type="range"
+                  min="5"
+                  max="35"
+                  step="5"
+                  className="range-input"
+                  aria-label="Average break duration in minutes"
+                  value={simBreakDuration}
+                  onChange={(e) => setSimBreakDuration(Number(e.target.value))}
+                />
+              </div>
+
+              <button
+                type="button"
+                className="button button-primary"
+                style={{ width: '100%', marginTop: 8, justifyContent: 'center', minHeight: 42, fontSize: 13, fontWeight: 700 }}
+                onClick={() => handleSimulateBehaviour()}
+                disabled={isSimulating}
+              >
+                {isSimulating ? <Sparkles size={16} /> : <SlidersHorizontal size={16} />}
+                <span>{isSimulating ? 'Simulating Behaviour…' : 'Simulate Behaviour'}</span>
+              </button>
+
+              {simError && (
+                <div style={{ marginTop: 8, padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', color: 'var(--coral)', borderRadius: 8, fontSize: 12 }}>
+                  {simError}
+                </div>
+              )}
+            </div>
+          </Panel>
+
+          <Panel eyebrow="Machine learning projection" title="Predicted well-being outcome">
+            {isSimulating ? (
+              <div className="empty-state">
+                <div className="empty-icon"><Sparkles size={22} color="var(--teal)" /></div>
+                <strong>Simulating Behaviour...</strong>
+                <p>Computing productivity score & habit archetype from digital indicators...</p>
+              </div>
+            ) : simResult ? (
+              <div className="forecast-card">
+                <div className="score-hero">
+                  <div style={{ fontSize: 11, textTransform: 'uppercase', letterSpacing: 1, color: 'var(--text-muted)', marginBottom: 4 }}>
+                    Forecasted Productivity Index
+                  </div>
+                  <div className="score-number">
+                    {simResult.predicted_productivity_score.toFixed(1)}
+                    <span className="score-unit"> / 100</span>
+                  </div>
+                  <div className="score-band">
+                    Expected Range: {simResult.confidence_band.lower} – {simResult.confidence_band.upper} (±8.8 MAE)
+                  </div>
+                  <div className={`score-delta ${simResult.delta_from_reference >= 0 ? 'positive' : 'negative'}`}>
+                    {simResult.delta_from_reference >= 0 ? <TrendingUp size={14} /> : <ArrowDownRight size={14} />}
+                    <span>{simResult.delta_from_reference >= 0 ? `+${simResult.delta_from_reference}` : simResult.delta_from_reference} pts vs. baseline</span>
+                  </div>
+                </div>
+
+                <div className={`archetype-box ${simResult.archetype.is_routine_drift ? 'drift' : ''}`}>
+                  <div className="archetype-title">
+                    <span>{simResult.archetype.archetype_name}</span>
+                    {simResult.archetype.is_routine_drift && <span className="drift-badge">Drift Alert</span>}
+                  </div>
+                  <p className="archetype-desc">{simResult.archetype.description}</p>
+                </div>
+
+                <div>
+                  <h4 style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--text-muted)', marginBottom: 8 }}>
+                    Explainable ML Drivers
+                  </h4>
+                  <ul className="factors-list">
+                    {simResult.contributing_factors.map((factor: string, idx: number) => (
+                      <li key={idx}>
+                        <Check size={14} color="var(--teal)" />
+                        <span>{factor}</span>
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+
+                <div style={{ padding: '12px 14px', background: 'var(--surface-soft)', borderRadius: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                  <strong>Transparency Note:</strong> Predictions are generated by Ridge regression ($R^2=0.5867$) and KMeans clustering trained on the TECHYUVAS dataset. This tool simulates task pacing trends and does not constitute medical diagnosis.
+                </div>
+              </div>
+            ) : (
+              <EmptyState title="Calculating forecast...">
+                Adjust the routine sliders to see live projections.
+              </EmptyState>
+            )}
+          </Panel>
+        </div>
+      </>
+    );
+  };
+
+  const renderDoppelganger = () => {
+    const availableDates = [...new Set([...visibleActivities.map((a) => a.date), ...visibleCheckIns.map((c) => c.date)])].sort().reverse();
+    const effectiveDate = availableDates.includes(replayDate) ? replayDate : (availableDates[0] || today);
+    const effectiveCompareDate = compareDate && availableDates.includes(compareDate)
+      ? compareDate
+      : (availableDates.find((d) => d !== effectiveDate) || '');
+
+    const currentDayActivity = visibleActivities.find((a) => a.date === effectiveDate) || null;
+    const currentDayCheckIns = visibleCheckIns.filter((c) => c.date === effectiveDate);
+    const { timestampedEvents, aggregateEvents } = buildDayEvents(currentDayActivity, currentDayCheckIns);
+    const allDayEvents = [...timestampedEvents, ...aggregateEvents];
+    const selectedEvent = allDayEvents.find((e) => e.id === selectedEventId) || timestampedEvents[0] || aggregateEvents[0] || null;
+    //
+    const compareDayActivity = visibleActivities.find((a) => a.date === effectiveCompareDate) || null;
+    const compareDayCheckIns = visibleCheckIns.filter((c) => c.date === effectiveCompareDate);
+    const comparisonMetrics = effectiveCompareDate
+      ? compareTwoDays(
+          { date: effectiveDate, activity: currentDayActivity, checkIns: currentDayCheckIns },
+          { date: effectiveCompareDate, activity: compareDayActivity, checkIns: compareDayCheckIns }
+        )
+      : [];
+
+    const handleScrubberChange = (val: number) => {
+      setIsPlaying(false);
+      setCurrentMinute(val);
+    };
+
+    return (
+      <>
+        <PageHeading page="doppelganger">
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 10, alignItems: 'center' }}>
+            <div className="workspace-switch" role="group" aria-label="Replay mode">
+              <button
+                type="button"
+                className={replayMode === 'single' ? 'workspace-option selected' : 'workspace-option'}
+                aria-pressed={replayMode === 'single'}
+                onClick={() => setReplayMode('single')}
+              >
+                <Eye size={13} /><span>Daily Replay</span>
+              </button>
+              <button
+                type="button"
+                className={replayMode === 'compare' ? 'workspace-option selected' : 'workspace-option'}
+                aria-pressed={replayMode === 'compare'}
+                onClick={() => setReplayMode('compare')}
+              >
+                <Split size={13} /><span>Compare Days</span>
+              </button>
+            </div>
+
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600 }}>
+              <span className="visually-hidden">Choose primary date</span>
+              <select
+                className="range-button"
+                style={{ cursor: 'pointer', padding: '6px 10px', fontSize: 12, borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}
+                value={effectiveDate}
+                onChange={(e) => {
+                  setReplayDate(e.target.value);
+                  setSelectedEventId(null);
+                  setCurrentMinute(1439);
+                }}
+              >
+                {availableDates.map((d) => (
+                  <option key={d} value={d}>
+                    {formatDate(d, { month: 'short', day: 'numeric', year: 'numeric' })}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            {replayMode === 'compare' && (
+              <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, fontWeight: 600 }}>
+                <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>vs.</span>
+                <select
+                  className="range-button"
+                  style={{ cursor: 'pointer', padding: '6px 10px', fontSize: 12, borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}
+                  value={effectiveCompareDate}
+                  onChange={(e) => setCompareDate(e.target.value)}
+                >
+                  {availableDates.map((d) => (
+                    <option key={d} value={d} disabled={d === effectiveDate}>
+                      {formatDate(d, { month: 'short', day: 'numeric', year: 'numeric' })} {d === effectiveDate ? '(Selected)' : ''}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
+          </div>
+        </PageHeading>
+
+        {availableDates.length === 0 ? (
+          <EmptyState title="No records available to replay">
+            Start by adding a daily check-in or activity snapshot to reconstruct your 24-hour timeline.
+          </EmptyState>
+        ) : (
+          <>
+            {/* Top Playback Toolbar */}
+            <div className="replay-toolbar">
+              <div className="playback-controls">
+                <button
+                  type="button"
+                  className={`replay-btn ${isPlaying ? '' : 'primary'}`}
+                  onClick={() => {
+                    if (!isPlaying) {
+                      if (currentMinute >= 1439) {
+                        setCurrentMinute(0);
+                      }
+                      setIsPlaying(true);
+                    } else {
+                      setIsPlaying(false);
+                    }
+                  }}
+                  aria-label={isPlaying ? 'Pause replay' : 'Play replay'}
+                >
+                  {isPlaying ? <Pause size={15} /> : <Play size={15} />}
+                  <span>{isPlaying ? 'Pause' : 'Play'}</span>
+                </button>
+                <button
+                  type="button"
+                  className="replay-btn"
+                  onClick={() => {
+                    setIsPlaying(false);
+                    setCurrentMinute((prev) => Math.max(0, prev - 60));
+                  }}
+                  aria-label="Step backward 1 hour"
+                  title="Step backward 1 hour (-1h)"
+                >
+                  <ChevronLeft size={15} />
+                  <span>-1h</span>
+                </button>
+                <button
+                  type="button"
+                  className="replay-btn"
+                  onClick={() => {
+                    setIsPlaying(false);
+                    setCurrentMinute((prev) => Math.min(1439, prev + 60));
+                  }}
+                  aria-label="Step forward 1 hour"
+                  title="Step forward 1 hour (+1h)"
+                >
+                  <span>+1h</span>
+                  <ChevronRight size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="replay-btn"
+                  onClick={() => {
+                    setIsPlaying(false);
+                    setCurrentMinute(0);
+                  }}
+                  aria-label="Reset replay to start"
+                  title="Reset to 00:00"
+                >
+                  <RotateCcw size={15} />
+                  <span>Reset</span>
+                </button>
+                <span className="replay-clock" aria-live="polite">
+                  {minuteToTimeString(currentMinute)}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-muted)' }}>Speed:</span>
+                <div className="speed-group" role="group" aria-label="Playback speed">
+                  {[1, 2, 5, 10].map((s) => (
+                    <button
+                      key={s}
+                      type="button"
+                      className={`speed-btn ${playbackSpeed === s ? 'active' : ''}`}
+                      onClick={() => setPlaybackSpeed(s)}
+                    >
+                      {s}x
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+
+            {/* 24-Hour Timeline Scrubber */}
+            <Panel eyebrow="24-Hour Daily Trajectory" title={`Reconstructing ${formatDate(effectiveDate, { weekday: 'long', month: 'long', day: 'numeric' })}`}>
+              <p className="field-hint" style={{ marginTop: -4, marginBottom: 12 }}>
+                Events are revealed chronologically as time advances. Check-ins are placed at their recorded minute. Full-day activity totals are annotated below.
+              </p>
+
+              <div className="timeline-track-wrap">
+                <div className="timeline-track">
+                  <div
+                    className="timeline-progress-bar"
+                    style={{ width: `${(currentMinute / 1439) * 100}%` }}
+                  />
+                  <div
+                    className="timeline-scrubber-handle"
+                    style={{ left: `${(currentMinute / 1439) * 100}%` }}
+                    title={`Current replay time: ${minuteToTimeString(currentMinute)}`}
+                  />
+
+                  {/* Timestamped event pins */}
+                  {timestampedEvents.map((evt) => {
+                    if (evt.minuteOfDay === null) return null;
+                    const pct = (evt.minuteOfDay / 1439) * 100;
+                    const isRevealed = evt.minuteOfDay <= currentMinute;
+                    const isSelected = selectedEvent?.id === evt.id;
+                    return (
+                      <button
+                        key={evt.id}
+                        type="button"
+                        className={`event-pin ${isRevealed ? 'revealed' : ''} ${isSelected ? 'selected' : ''}`}
+                        style={{ left: `${pct}%` }}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setSelectedEventId(evt.id);
+                          if (evt.minuteOfDay !== null) {
+                            setCurrentMinute(evt.minuteOfDay);
+                          }
+                        }}
+                        title={`${evt.title} at ${evt.timeLabel}`}
+                        aria-label={`${evt.title} at ${evt.timeLabel}`}
+                      />
+                    );
+                  })}
+                </div>
+
+                <input
+                  type="range"
+                  min="0"
+                  max="1439"
+                  value={currentMinute}
+                  onChange={(e) => handleScrubberChange(Number(e.target.value))}
+                  style={{
+                    position: 'absolute',
+                    top: 0,
+                    left: 0,
+                    width: '100%',
+                    height: '24px',
+                    opacity: 0,
+                    cursor: 'pointer',
+                    zIndex: 10,
+                  }}
+                  aria-label="Timeline scrubber slider"
+                />
+
+                <div className="timeline-markers" aria-hidden="true">
+                  <span>12:00 AM</span>
+                  <span>04:00 AM</span>
+                  <span>08:00 AM</span>
+                  <span>12:00 PM</span>
+                  <span>04:00 PM</span>
+                  <span>08:00 PM</span>
+                  <span>11:59 PM</span>
+                </div>
+              </div>
+
+              {/* Wellbeing Overlay Toggles */}
+              <div className="overlay-toggles">
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-soft)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Layers size={14} /> Wellbeing Overlays:
+                </span>
+                {(['mood', 'stress', 'energy', 'fatigue'] as const).map((metric) => (
+                  <button
+                    key={metric}
+                    type="button"
+                    className={`overlay-toggle ${overlays[metric] ? 'active' : ''}`}
+                    aria-pressed={overlays[metric]}
+                    onClick={() => setOverlays((prev) => ({ ...prev, [metric]: !prev[metric] }))}
+                  >
+                    <span>{metric.charAt(0).toUpperCase() + metric.slice(1)}</span>
+                    {overlays[metric] && <Check size={12} />}
+                  </button>
+                ))}
+              </div>
+
+              {/* Revealed Wellbeing Markers Summary */}
+              {timestampedEvents.some((e) => (e.minuteOfDay ?? 0) <= currentMinute && e.ratings) && (
+                <div style={{ marginTop: 16, display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+                  {timestampedEvents
+                    .filter((e) => (e.minuteOfDay ?? 0) <= currentMinute && e.ratings)
+                    .map((e) => (
+                      <div
+                        key={e.id}
+                        onClick={() => setSelectedEventId(e.id)}
+                        style={{
+                          cursor: 'pointer',
+                          padding: '6px 12px',
+                          borderRadius: 8,
+                          background: selectedEvent?.id === e.id ? 'var(--teal-wash)' : 'var(--surface-soft)',
+                          border: `1px solid ${selectedEvent?.id === e.id ? 'var(--teal)' : 'var(--border)'}`,
+                          fontSize: 12,
+                        }}
+                      >
+                        <strong>{e.timeLabel}</strong>:
+                        {overlays.mood && <span> Mood {e.ratings?.mood}/5</span>}
+                        {overlays.stress && <span> · Stress {e.ratings?.stress}/5</span>}
+                        {overlays.energy && <span> · Energy {e.ratings?.energy}/5</span>}
+                        {overlays.fatigue && <span> · Fatigue {e.ratings?.fatigue}/5</span>}
+                      </div>
+                    ))}
+                </div>
+              )}
+            </Panel>
+
+            {/* Split Grid: Event Inspector & Comparison/Aggregates */}
+            <div className="doppelganger-grid">
+              {/* Event Inspector */}
+              <Panel eyebrow="Inspection Drawer" title="Event Details">
+                {selectedEvent ? (
+                  <div className="event-details-card">
+                    <div className="event-details-header">
+                      <div>
+                        <span className="eyebrow">{selectedEvent.hasExactTimestamp ? 'Timestamped Check-In' : 'Daily Aggregate Log'}</span>
+                        <h3 style={{ margin: 0 }}>{selectedEvent.title}</h3>
+                      </div>
+                      <SourceBadge source={selectedEvent.source} />
+                    </div>
+
+                    <div style={{ fontSize: 13, color: 'var(--text-soft)', marginBottom: 12 }}>
+                      <Clock3 size={14} style={{ verticalAlign: -2, marginRight: 5 }} />
+                      <strong>Time:</strong> {selectedEvent.timeLabel}
+                    </div>
+
+                    {selectedEvent.ratings && (
+                      <div className="rating-pill-row">
+                        <span className="rating-pill">Mood: {selectedEvent.ratings.mood} / 5</span>
+                        <span className="rating-pill">Stress: {selectedEvent.ratings.stress} / 5</span>
+                        <span className="rating-pill">Energy: {selectedEvent.ratings.energy} / 5</span>
+                        <span className="rating-pill">Fatigue: {selectedEvent.ratings.fatigue} / 5</span>
+                      </div>
+                    )}
+
+                    {selectedEvent.metrics && (
+                      <div className="rating-pill-row">
+                        {selectedEvent.metrics.screenTime !== undefined && (
+                          <span className="rating-pill">Screen: {selectedEvent.metrics.screenTime.toFixed(1)}h</span>
+                        )}
+                        {selectedEvent.metrics.activeWork !== undefined && (
+                          <span className="rating-pill">Active Work: {selectedEvent.metrics.activeWork.toFixed(1)}h</span>
+                        )}
+                        {selectedEvent.metrics.lateNight !== undefined && (
+                          <span className="rating-pill">Late Night: {selectedEvent.metrics.lateNight.toFixed(1)}h</span>
+                        )}
+                        {selectedEvent.metrics.breaks !== undefined && (
+                          <span className="rating-pill">Breaks: {selectedEvent.metrics.breaks}</span>
+                        )}
+                        {selectedEvent.metrics.tasks !== undefined && (
+                          <span className="rating-pill">Tasks: {selectedEvent.metrics.tasks}</span>
+                        )}
+                      </div>
+                    )}
+
+                    {selectedEvent.note ? (
+                      <div style={{ marginTop: 12, padding: '10px 14px', background: 'var(--surface-soft)', borderRadius: 8, fontSize: 13 }}>
+                        <strong>Note:</strong> <em>"{selectedEvent.note}"</em>
+                      </div>
+                    ) : (
+                      <p style={{ fontSize: 12, color: 'var(--text-muted)', margin: '8px 0 0' }}>No written reflection notes attached to this event.</p>
+                    )}
+                  </div>
+                ) : (
+                  <EmptyState title="No event selected">
+                    Click any marker on the 24-hour timeline above to inspect its details.
+                  </EmptyState>
+                )}
+
+                {/* Aggregate Logs Card (Preserving no-fabricated-timestamps integrity) */}
+                <div style={{ marginTop: 16 }}>
+                  <h4 style={{ fontSize: 12, textTransform: 'uppercase', letterSpacing: 0.8, color: 'var(--text-muted)', marginBottom: 8 }}>
+                    Full-Day Activity Records
+                  </h4>
+                  {aggregateEvents.length ? (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                      {aggregateEvents.map((agg) => (
+                        <div
+                          key={agg.id}
+                          onClick={() => setSelectedEventId(agg.id)}
+                          style={{
+                            cursor: 'pointer',
+                            padding: '10px 12px',
+                            background: selectedEvent?.id === agg.id ? 'var(--teal-wash)' : 'var(--surface)',
+                            border: `1px solid ${selectedEvent?.id === agg.id ? 'var(--teal)' : 'var(--border)'}`,
+                            borderRadius: 8,
+                            fontSize: 12,
+                          }}
+                        >
+                          <strong>{agg.title}</strong>
+                          <p style={{ margin: '4px 0 0', color: 'var(--text-muted)' }}>{agg.description}</p>
+                          <small style={{ color: 'var(--teal)', display: 'block', marginTop: 4 }}>
+                            {agg.timeLabel}
+                          </small>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p style={{ fontSize: 12, color: 'var(--text-muted)' }}>No aggregate activity logged for this date.</p>
+                  )}
+                </div>
+              </Panel>
+
+              {/* Two-Day Comparison or Daily Breakdown */}
+              {replayMode === 'compare' ? (
+                <Panel eyebrow="Comparative Behavior" title={`Comparing ${formatDate(effectiveDate)} vs ${formatDate(effectiveCompareDate)}`}>
+                  <p className="field-hint" style={{ marginTop: -4, marginBottom: 12 }}>
+                    Objective delta between both recorded dates. Missing metrics are noted rather than treated as zero.
+                  </p>
+                  <table className="comparison-table">
+                    <thead>
+                      <tr>
+                        <th>Metric</th>
+                        <th>{formatDate(effectiveDate, { month: 'short', day: 'numeric' })}</th>
+                        <th>{formatDate(effectiveCompareDate, { month: 'short', day: 'numeric' })}</th>
+                        <th>Difference</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {comparisonMetrics.map((row, idx) => (
+                        <tr key={idx}>
+                          <td><strong>{row.label}</strong></td>
+                          <td>{row.dayAValue}</td>
+                          <td>{row.dayBValue}</td>
+                          <td>
+                            {row.delta !== undefined ? (
+                              <span className={`comparison-delta ${String(row.delta).startsWith('+') ? 'positive' : String(row.delta).startsWith('-') ? 'negative' : ''}`}>
+                                {row.delta}
+                              </span>
+                            ) : (
+                              <span style={{ color: 'var(--text-muted)' }}>—</span>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </Panel>
+              ) : (
+                <Panel eyebrow="Summary of Day" title="Daily Overview">
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+                    <div className="metric-card">
+                      <div className="metric-icon teal"><Activity size={18} /></div>
+                      <div className="metric-content">
+                        <span className="metric-label">Screen Time</span>
+                        <strong>{currentDayActivity ? `${currentDayActivity.totalScreenTime.toFixed(1)}h` : 'Not recorded'}</strong>
+                        <span className="metric-note">{currentDayActivity?.workStudyHours ? `${currentDayActivity.workStudyHours.toFixed(1)}h active work` : 'No study breakdown'}</span>
+                      </div>
+                    </div>
+
+                    <div className="metric-card">
+                      <div className="metric-icon rose"><Heart size={18} /></div>
+                      <div className="metric-content">
+                        <span className="metric-label">Reflections</span>
+                        <strong>{currentDayCheckIns.length} check-in{currentDayCheckIns.length === 1 ? '' : 's'}</strong>
+                        <span className="metric-note">
+                          {currentDayCheckIns.length
+                            ? `Avg stress: ${(currentDayCheckIns.reduce((s, c) => s + c.stress, 0) / currentDayCheckIns.length).toFixed(1)}/5`
+                            : 'No check-in entered'}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div style={{ padding: '12px 14px', background: 'var(--surface-soft)', borderRadius: 8, fontSize: 11, color: 'var(--text-muted)' }}>
+                      <strong>Integrity Notice:</strong> Timeline replay shows exact timestamps only when recorded. Full-day activity entries do not fabricate start or end times.
+                    </div>
+                  </div>
+                </Panel>
+              )}
+            </div>
+          </>
+        )}
+      </>
+    );
+  };
+
   const pageContent: Record<AppPage, () => ReactNode> = {
     overview: renderOverview,
+    doppelganger: renderDoppelganger,
+    simulator: renderSimulator,
     checkin: renderCheckIn,
     activity: renderActivity,
     insights: renderInsights,

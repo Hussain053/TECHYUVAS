@@ -252,10 +252,13 @@ export function loadAppData(): LoadedAppData {
     }
     const hasPersonalRecords = saved.moodCheckIns.some((item) => item.source === 'user')
       || saved.activityEntries.some((item) => item.source === 'user');
+    const userMoods = saved.moodCheckIns.filter((item) => item.source === 'user').map(withLegacyTimestamp);
+    const userActivities = saved.activityEntries.filter((item) => item.source === 'user');
+
     return {
       data: {
-        moodCheckIns: saved.moodCheckIns.map(withLegacyTimestamp),
-        activityEntries: saved.activityEntries,
+        moodCheckIns: [...demoMoodCheckIns, ...userMoods],
+        activityEntries: [...demoActivityEntries, ...userActivities],
         preferences: {
           theme: saved.preferences.theme,
           dataMode: isDataMode(saved.preferences.dataMode)
