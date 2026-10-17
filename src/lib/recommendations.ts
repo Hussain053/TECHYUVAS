@@ -7,7 +7,17 @@ export function buildRecommendations(insights: BehaviorInsight[]): Recommendatio
   );
 
   for (const insight of insights) {
-    if (insight.id === 'late-night-change') {
+    if (insight.id === 'combined-stress-pattern') {
+      recommendations.push({
+        id: 'combined-pattern-reset',
+        title: 'Choose one supportive next step',
+        explanation: 'Your activity notes and self-reported well-being both shifted from your baseline. A small response may be more useful than trying to change everything at once.',
+        supportingObservation: insight.evidence,
+        suggestedAction: 'Consider a brief screen-free break, a gentler wind-down, or making your next task more manageable—choose what fits your day.',
+        priority: 'consider',
+        relatedInsightId: insight.id,
+      });
+    } else if (insight.id === 'late-night-change') {
       recommendations.push({
         id: 'wind-down',
         title: 'Try a gentler wind-down',
@@ -40,14 +50,37 @@ export function buildRecommendations(insights: BehaviorInsight[]): Recommendatio
     } else if (insight.id === 'screen-time-change') {
       recommendations.push({
         id: 'screen-boundaries',
-        title: 'Notice where screen time goes',
-        explanation: 'Your recent screen-time average has moved beyond your earlier routine.',
+        title: 'Try one small screen-time boundary',
+        explanation: `Your recent screen-time average is ${insight.recentValue?.toFixed(1) ?? '—'} hours a day, compared with ${insight.baselineValue?.toFixed(1) ?? '—'} hours in your earlier baseline. A small experiment can help you see what fits your routine.`,
         supportingObservation: insight.evidence,
-        suggestedAction: 'If helpful, look at the activity categories and choose one small boundary to try.',
+        suggestedAction: 'For the next 3 days, choose one non-essential screen session and stop 15 minutes earlier. Keep work or study time separate, then notice whether the change felt manageable.',
+        priority: 'gentle',
+        relatedInsightId: insight.id,
+      });
+    } else if (insight.id === 'work-study-change') {
+      recommendations.push({
+        id: 'routine-check',
+        title: 'Check whether your routine needs adjusting',
+        explanation: 'Your recorded work or study hours have shifted from your earlier pattern.',
+        supportingObservation: insight.evidence,
+        suggestedAction: 'If the change feels difficult, consider breaking the day into smaller work blocks with protected pauses.',
         priority: 'gentle',
         relatedInsightId: insight.id,
       });
     }
+  }
+
+  const stressInsight = insights.find((insight) => insight.id === 'stress-change');
+  if (stressInsight) {
+    recommendations.push({
+      id: 'guided-reset',
+      title: 'Try a short guided reset',
+      explanation: 'A brief pause can create room to notice how you are feeling without needing to solve everything at once.',
+      supportingObservation: stressInsight.evidence,
+      suggestedAction: 'Try two minutes of slow breathing or a short guided relaxation from a source you trust. Stop if it does not feel comfortable.',
+      priority: 'gentle',
+      relatedInsightId: stressInsight.id,
+    });
   }
 
   if (workloadInsights.length > 0) {

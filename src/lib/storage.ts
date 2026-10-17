@@ -1,6 +1,7 @@
 import { demoActivityEntries, demoMoodCheckIns } from '../data/demoData';
 import type {
   AppData,
+  DataMode,
   DailyActivity,
   MoodCheckIn,
   ThemePreference,
@@ -94,6 +95,14 @@ function isTheme(value: unknown): value is ThemePreference {
   return value === 'light' || value === 'dark';
 }
 
+function isDataMode(value: unknown): value is DataMode {
+  return value === 'demo' || value === 'personal';
+}
+
+function isProfileName(value: unknown): value is string {
+  return typeof value === 'string' && value.length <= 40;
+}
+
 function fromLegacyStorage(storage: Storage): { data: AppData | null; warning: string | null } {
   const rawMood = storage.getItem(LEGACY_MOOD_KEY);
   const rawActivity = storage.getItem(LEGACY_ACTIVITY_KEY);
@@ -112,15 +121,12 @@ function fromLegacyStorage(storage: Storage): { data: AppData | null; warning: s
     const rawTheme = storage.getItem(LEGACY_THEME_KEY);
     const personalMoods = moods.filter((item) => item.source === 'user').map(withLegacyTimestamp);
     const personalActivities = activities.filter((item) => item.source === 'user');
-    const personalActivityDates = new Set(personalActivities.map((item) => item.date));
+    const dataMode: DataMode = personalMoods.length || personalActivities.length ? 'personal' : 'demo';
     return {
       data: {
         moodCheckIns: [...demoMoodCheckIns, ...personalMoods],
-        activityEntries: [
-          ...demoActivityEntries.filter((item) => !personalActivityDates.has(item.date)),
-          ...personalActivities,
-        ],
-        preferences: { theme: isTheme(rawTheme) ? rawTheme : defaultTheme() },
+        activityEntries: [...demoActivityEntries, ...personalActivities],
+        preferences: { theme: isTheme(rawTheme) ? rawTheme : defaultTheme(), dataMode, profileName: '' },
       },
       warning: null,
     };
@@ -137,7 +143,7 @@ export function loadAppData(): LoadedAppData {
   const fallback: AppData = {
     moodCheckIns: demoMoodCheckIns,
     activityEntries: demoActivityEntries,
-    preferences: { theme: defaultTheme() },
+    preferences: { theme: defaultTheme(), dataMode: 'demo', profileName: '' },
   };
 
   if (!storage) {
@@ -160,14 +166,23 @@ export function loadAppData(): LoadedAppData {
     if (!Array.isArray(saved.moodCheckIns) || !saved.moodCheckIns.every(isMoodCheckIn)
       || !Array.isArray(saved.activityEntries) || !saved.activityEntries.every(isDailyActivity)
       || typeof saved.preferences !== 'object' || saved.preferences === null
-      || !isTheme(saved.preferences.theme)) {
+      || !isTheme(saved.preferences.theme)
+      || (saved.preferences.profileName !== undefined && !isProfileName(saved.preferences.profileName))) {
       throw new Error('Saved data did not pass validation.');
     }
+    const hasPersonalRecords = saved.moodCheckIns.some((item) => item.source === 'user')
+      || saved.activityEntries.some((item) => item.source === 'user');
     return {
       data: {
         moodCheckIns: saved.moodCheckIns.map(withLegacyTimestamp),
         activityEntries: saved.activityEntries,
-        preferences: saved.preferences,
+        preferences: {
+          theme: saved.preferences.theme,
+          dataMode: isDataMode(saved.preferences.dataMode)
+            ? saved.preferences.dataMode
+            : hasPersonalRecords ? 'personal' : 'demo',
+          profileName: isProfileName(saved.preferences.profileName) ? saved.preferences.profileName : '',
+        },
       },
       warning: null,
     };
@@ -196,7 +211,7 @@ export function restoreDemoData(): AppData {
   return {
     moodCheckIns: demoMoodCheckIns.map((item) => ({ ...item })),
     activityEntries: demoActivityEntries.map((item) => ({ ...item })),
-    preferences: { theme: defaultTheme() },
+    preferences: { theme: defaultTheme(), dataMode: 'demo', profileName: '' },
   };
 }
 

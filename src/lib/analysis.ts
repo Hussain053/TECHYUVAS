@@ -109,7 +109,7 @@ function compareNumericMetric(
   entries: DailyActivity[],
   metric: keyof Pick<
     DailyActivity,
-    'totalScreenTime' | 'lateNightUsage' | 'breaks' | 'workStudyHours'
+    'totalScreenTime' | 'lateNightUsage' | 'breaks' | 'workStudyHours' | 'tasksCompleted'
   >,
   label: string,
   unit: string,
@@ -182,6 +182,7 @@ export function analyzeBaseline(
     compareNumericMetric(activities, 'lateNightUsage', 'Late-night use', 'h/day'),
     compareNumericMetric(activities, 'breaks', 'Breaks', '/day'),
     compareNumericMetric(activities, 'workStudyHours', 'Work / study', 'h/day'),
+    compareNumericMetric(activities, 'tasksCompleted', 'Tasks completed', '/day'),
   ].filter((item): item is MetricComparison => item !== null);
   const moodComparisons = [
     compareMoodMetric(checkIns, 'stress', 'Self-reported stress'),
@@ -212,7 +213,7 @@ export function buildInsights(analysis: BaselineAnalysis): {
     recentValue?: number;
     baselineValue?: number;
   }>;
-  drift: number | null;
+  activityVariationIndex: number | null;
 } {
   if (!analysis.available) {
     return {
@@ -223,7 +224,7 @@ export function buildInsights(analysis: BaselineAnalysis): {
         evidence: analysis.reason,
         status: 'insufficient',
       }],
-      drift: null,
+      activityVariationIndex: null,
     };
   }
 
@@ -240,6 +241,8 @@ export function buildInsights(analysis: BaselineAnalysis): {
   const screen = analysis.activityComparisons.find((item) => item.metric === 'Screen time');
   const lateNight = analysis.activityComparisons.find((item) => item.metric === 'Late-night use');
   const breaks = analysis.activityComparisons.find((item) => item.metric === 'Breaks');
+  const workStudy = analysis.activityComparisons.find((item) => item.metric === 'Work / study');
+  const tasksCompleted = analysis.activityComparisons.find((item) => item.metric === 'Tasks completed');
   const stress = analysis.moodComparisons.find((item) => item.metric === 'Self-reported stress');
   const energy = analysis.moodComparisons.find((item) => item.metric === 'Self-reported energy');
   const fatigue = analysis.moodComparisons.find((item) => item.metric === 'Self-reported fatigue');
@@ -295,6 +298,26 @@ export function buildInsights(analysis: BaselineAnalysis): {
     'Fewer breaks recorded',
   );
   addMetricInsight(
+    'tasks-completed-change',
+    tasksCompleted,
+    'lower',
+    Math.max(1, (tasksCompleted?.baseline ?? 0) * 0.2),
+    'You recorded fewer completed tasks than in your earlier routine. Task counts can vary for many reasons and are not a measure of personal worth.',
+    'Fewer tasks completed',
+  );
+  if (workStudy && Math.abs(workStudy.recent - workStudy.baseline) >= Math.max(1, workStudy.baseline * 0.25)) {
+    insights.push({
+      id: 'work-study-change',
+      title: 'Work / study hours shifted',
+      description: 'Your average recorded work or study time differs from your earlier routine. A change in hours alone does not explain why the routine changed.',
+      evidence: `${workStudy.metric}: ${workStudy.recent.toFixed(1)}${workStudy.unit}, compared with ${workStudy.baseline.toFixed(1)}${workStudy.unit} in the prior baseline.`,
+      status: 'notice',
+      metric: workStudy.metric,
+      recentValue: workStudy.recent,
+      baselineValue: workStudy.baseline,
+    });
+  }
+  addMetricInsight(
     'stress-change',
     stress,
     'higher',
@@ -319,16 +342,31 @@ export function buildInsights(analysis: BaselineAnalysis): {
     'Fatigue ratings have moved up',
   );
 
-  const driftMeasures = analysis.activityComparisons.slice(0, 4);
-  const drift = driftMeasures.length >= 2
-    ? Math.round(driftMeasures.reduce((sum, item) => {
+  const activitySignals = insights.filter((insight) =>
+    ['screen-time-change', 'late-night-change', 'breaks-change', 'tasks-completed-change', 'work-study-change'].includes(insight.id),
+  );
+  const selfReportedSignals = insights.filter((insight) =>
+    ['stress-change', 'energy-change', 'fatigue-change'].includes(insight.id),
+  );
+  if (activitySignals.length && selfReportedSignals.length) {
+    insights.push({
+      id: 'combined-stress-pattern',
+      title: 'Activity and well-being changes appeared together',
+      description: 'A change in your recorded routine coincides with a change in your self-reported well-being. This may be worth noticing, but it does not show that one caused the other or indicate a health condition.',
+      evidence: [...activitySignals, ...selfReportedSignals]
+        .map((insight) => insight.evidence)
+        .join(' '),
+      status: 'combined',
+    });
+  }
+
+  const variationMeasures = analysis.activityComparisons;
+  const activityVariationIndex = variationMeasures.length >= 2
+    ? Math.round(variationMeasures.reduce((sum, item) => {
       const relativeChange = Math.abs(item.recent - item.baseline) / Math.max(Math.abs(item.baseline), 1);
       return sum + Math.min(relativeChange, 1);
-    }, 0) / driftMeasures.length * 100)
+    }, 0) / variationMeasures.length * 100)
     : null;
-  if (insights.length > 1) {
-    for (const insight of insights) insight.status = 'combined';
-  }
   if (!insights.length) {
     insights.push({
       id: 'within-range',
@@ -338,5 +376,5 @@ export function buildInsights(analysis: BaselineAnalysis): {
       status: 'steady',
     });
   }
-  return { insights, drift };
+  return { insights, activityVariationIndex };
 }

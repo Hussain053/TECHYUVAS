@@ -50,7 +50,7 @@ import { loadAppData, restoreDemoData, saveAppData } from './lib/storage';
 import type {
   AppData,
   AppPage,
-  BehaviorInsight,
+  DataMode,
   DailyActivity,
   MoodCheckIn,
   ThemePreference,
@@ -86,7 +86,7 @@ const pageCopy: Record<AppPage, { title: string; description: string }> = {
   },
   recommendations: {
     title: 'Small steps that may help',
-    description: 'Practical, optional suggestions connected to the patterns you have recorded.',
+    description: 'Practical, optional suggestions linked to recorded patterns. Labels are rule-based guidance, not a measure of severity or effectiveness.',
   },
   history: {
     title: 'Your history',
@@ -174,10 +174,9 @@ function optionalNumber(value: string): number | undefined {
   return value.trim() === '' ? undefined : Number(value);
 }
 
-function dataStatus(data: AppData): { demoOnly: boolean; demoCount: number; userCount: number } {
+function dataStatus(data: AppData): { demoCount: number; userCount: number } {
   const records = [...data.moodCheckIns, ...data.activityEntries];
   return {
-    demoOnly: records.length > 0 && records.every((record) => record.source === 'demo'),
     demoCount: records.filter((record) => record.source === 'demo').length,
     userCount: records.filter((record) => record.source === 'user').length,
   };
@@ -255,6 +254,12 @@ function SourceBadge({ source }: { source: 'demo' | 'user' }) {
   return <span className={`source-badge ${source}`}>{source === 'demo' ? 'Sample' : 'Personal'}</span>;
 }
 
+function recommendationPriorityLabel(priority: 'gentle' | 'consider' | 'useful'): string {
+  if (priority === 'gentle') return 'Gentle option';
+  if (priority === 'consider') return 'Worth considering';
+  return 'Practical step';
+}
+
 function EmptyState({ title, children }: { title: string; children: ReactNode }) {
   return (
     <div className="empty-state">
@@ -305,25 +310,6 @@ function RatingScale({
   );
 }
 
-function InsightCard({ insight }: { insight: BehaviorInsight }) {
-  return (
-    <article className={`insight-card ${insight.status}`}>
-      <div className="insight-card-top">
-        <span className={`status-dot ${insight.status}`} />
-        <span className="insight-status">
-          {insight.status === 'steady' ? 'Within recent range'
-            : insight.status === 'combined' ? 'Changes observed together'
-              : insight.status === 'insufficient' ? 'More history needed'
-                : 'A change to notice'}
-        </span>
-      </div>
-      <h3>{insight.title}</h3>
-      <p>{insight.description}</p>
-      <div className="insight-evidence">{insight.evidence}</div>
-    </article>
-  );
-}
-
 function App() {
   const [initial] = useState(() => loadAppData());
   const [data, setData] = useState<AppData>(initial.data);
@@ -337,6 +323,8 @@ function App() {
   const [range, setRange] = useState<DateRange>('7d');
   const [historyRange, setHistoryRange] = useState<DateRange>('30d');
   const [historySearch, setHistorySearch] = useState('');
+  const [profileNameDraft, setProfileNameDraft] = useState(initial.data.preferences.profileName);
+  const [profileNameError, setProfileNameError] = useState('');
   const today = localDateKey();
 
   useEffect(() => {
@@ -353,19 +341,33 @@ function App() {
     return () => window.clearTimeout(timeout);
   }, [notice]);
 
-  const orderedActivities = useMemo(() => sortActivities(data.activityEntries), [data.activityEntries]);
-  const orderedCheckIns = useMemo(() => sortCheckIns(data.moodCheckIns), [data.moodCheckIns]);
+  const selectedSource = data.preferences.dataMode === 'demo' ? 'demo' : 'user';
+  const visibleActivities = useMemo(
+    () => data.activityEntries.filter((entry) => entry.source === selectedSource),
+    [data.activityEntries, selectedSource],
+  );
+  const visibleCheckIns = useMemo(
+    () => data.moodCheckIns.filter((entry) => entry.source === selectedSource),
+    [data.moodCheckIns, selectedSource],
+  );
+  const orderedActivities = useMemo(() => sortActivities(visibleActivities), [visibleActivities]);
+  const orderedCheckIns = useMemo(() => sortCheckIns(visibleCheckIns), [visibleCheckIns]);
   const allSummaries = useMemo(
-    () => buildDailySummaries(data.activityEntries, data.moodCheckIns),
-    [data.activityEntries, data.moodCheckIns],
+    () => buildDailySummaries(visibleActivities, visibleCheckIns),
+    [visibleActivities, visibleCheckIns],
   );
   const baseline = useMemo(
-    () => analyzeBaseline(data.activityEntries, data.moodCheckIns),
-    [data.activityEntries, data.moodCheckIns],
+    () => analyzeBaseline(visibleActivities, visibleCheckIns),
+    [visibleActivities, visibleCheckIns],
   );
   const analysis = useMemo(() => buildInsights(baseline), [baseline]);
   const recommendations = useMemo(() => buildRecommendations(analysis.insights), [analysis.insights]);
   const sourceSummary = useMemo(() => dataStatus(data), [data]);
+  const visibleSourceSummary = useMemo(() => dataStatus({
+    ...data,
+    moodCheckIns: visibleCheckIns,
+    activityEntries: visibleActivities,
+  }), [data, visibleActivities, visibleCheckIns]);
   const todaySummary = allSummaries.find((item) => item.date === today);
   const todayCheckIns = orderedCheckIns.filter((entry) => entry.date === today);
   const chartSummaries = filterByRange(allSummaries, range);
@@ -389,6 +391,28 @@ function App() {
 
   const setTheme = (theme: ThemePreference) => {
     updateData((previous) => ({ ...previous, preferences: { ...previous.preferences, theme } }));
+  };
+
+  const setDataMode = (dataMode: DataMode) => {
+    updateData((previous) => ({
+      ...previous,
+      preferences: { ...previous.preferences, dataMode },
+    }));
+  };
+
+  const saveProfileName = (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const profileName = profileNameDraft.trim();
+    if (profileName.length > 40) {
+      setProfileNameError('Use 40 characters or fewer.');
+      return;
+    }
+    setProfileNameError('');
+    setProfileNameDraft(profileName);
+    updateData((previous) => ({
+      ...previous,
+      preferences: { ...previous.preferences, profileName },
+    }));
   };
 
   const saveMood = (event: FormEvent<HTMLFormElement>) => {
@@ -415,6 +439,7 @@ function App() {
     };
     updateData((previous) => ({
       ...previous,
+      preferences: { ...previous.preferences, dataMode: 'personal' },
       moodCheckIns: sortCheckIns([
         ...previous.moodCheckIns.filter((item) => item.id !== entry.id),
         entry,
@@ -463,7 +488,7 @@ function App() {
 
     const entry: DailyActivity = {
       id: activityForm.editingId
-        ?? data.activityEntries.find((item) => item.date === activityForm.date)?.id
+        ?? data.activityEntries.find((item) => item.source === 'user' && item.date === activityForm.date)?.id
         ?? makeId('activity'),
       date: activityForm.date,
       totalScreenTime: total,
@@ -479,8 +504,10 @@ function App() {
     };
     updateData((previous) => ({
       ...previous,
+      preferences: { ...previous.preferences, dataMode: 'personal' },
       activityEntries: sortActivities([
-        ...previous.activityEntries.filter((item) => item.id !== entry.id && item.date !== entry.date),
+        ...previous.activityEntries.filter((item) =>
+          item.id !== entry.id && !(item.source === 'user' && item.date === entry.date)),
         entry,
       ]),
     }));
@@ -520,6 +547,7 @@ function App() {
   };
 
   const deleteMood = (entry: MoodCheckIn) => {
+    if (entry.source !== 'user') return;
     if (!window.confirm(`Delete the ${formatDateTime(entry.recordedAt)} check-in? This cannot be undone.`)) return;
     updateData((previous) => ({
       ...previous,
@@ -528,6 +556,7 @@ function App() {
   };
 
   const deleteActivity = (entry: DailyActivity) => {
+    if (entry.source !== 'user') return;
     if (!window.confirm(`Delete the activity entry for ${formatDate(entry.date)}? This cannot be undone.`)) return;
     updateData((previous) => ({
       ...previous,
@@ -540,7 +569,7 @@ function App() {
     if (!window.confirm('Restore the sample dataset? This replaces the records currently saved in this browser.')) return;
     updateData((previous) => ({
       ...restoreDemoData(),
-      preferences: previous.preferences,
+      preferences: { ...previous.preferences, dataMode: 'demo' },
     }));
     setMoodForm(newMoodForm());
     setActivityForm(newActivityForm());
@@ -559,7 +588,16 @@ function App() {
 
   const exportData = () => {
     try {
-      const payload = JSON.stringify({ format: 'mindtrace-local-export-v1', exportedAt: new Date().toISOString(), data }, null, 2);
+      const payload = JSON.stringify({
+        format: 'mindtrace-local-export-v1',
+        exportedAt: new Date().toISOString(),
+        mode: data.preferences.dataMode,
+        data: {
+          moodCheckIns: visibleCheckIns,
+          activityEntries: visibleActivities,
+          preferences: data.preferences,
+        },
+      }, null, 2);
       const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
       const link = document.createElement('a');
       link.href = url;
@@ -574,6 +612,25 @@ function App() {
 
   const goToAction = (page: AppPage) => () => navigate(page);
 
+  const renderModeSwitch = () => (
+    <div className="workspace-switch" role="group" aria-label="Choose data workspace">
+      <button
+        className={data.preferences.dataMode === 'demo' ? 'workspace-option selected' : 'workspace-option'}
+        aria-pressed={data.preferences.dataMode === 'demo'}
+        onClick={() => setDataMode('demo')}
+      >
+        <Compass size={14} /><span>Explore demo</span>
+      </button>
+      <button
+        className={data.preferences.dataMode === 'personal' ? 'workspace-option selected' : 'workspace-option'}
+        aria-pressed={data.preferences.dataMode === 'personal'}
+        onClick={() => setDataMode('personal')}
+      >
+        <Heart size={14} /><span>Personal</span>
+      </button>
+    </div>
+  );
+
   const renderOverview = () => {
     const latestTodayMood = todayCheckIns.at(-1);
     const chartData = chartSummaries.map((summary) => ({
@@ -587,7 +644,6 @@ function App() {
       fatigue: summary.averageFatigue === null ? null : Number(summary.averageFatigue.toFixed(2)),
     }));
     const recentCheckIns = [...todayCheckIns].reverse();
-    const priorityInsight = analysis.insights[0];
     return (
       <>
         <PageHeading page="overview">
@@ -595,12 +651,39 @@ function App() {
           <button className="button button-primary" onClick={goToAction('activity')}><Plus size={16} /> Log activity</button>
         </PageHeading>
 
-        {sourceSummary.demoOnly && (
-          <div className="demo-banner"><span className="demo-pip" /> Sample data is shown. Add your own entries to make these patterns personal.
-            <button onClick={goToAction('demo')}>Try the interactive demo <ChevronRight size={14} /></button>
-            <button onClick={goToAction('settings')}>Data controls <ChevronRight size={14} /></button>
+        {data.preferences.dataMode === 'demo' ? (
+          <div className="demo-banner"><span className="demo-pip" /> Illustrative sample data · Your entries are kept in a separate personal workspace.
+            <button onClick={goToAction('demo')}>How this demo works <ChevronRight size={14} /></button>
           </div>
+        ) : visibleActivities.length + visibleCheckIns.length === 0 ? (
+          <div className="workspace-empty-banner">
+            <div><strong>Your personal workspace is ready.</strong><span>Nothing is collected automatically. Add a check-in or activity snapshot when you choose.</span></div>
+            <button className="button button-primary" onClick={goToAction('checkin')}>Add a check-in <ChevronRight size={15} /></button>
+          </div>
+        ) : (
+          <div className="personal-banner"><span className="personal-pip" /> Personal workspace · {visibleSourceSummary.userCount} {visibleSourceSummary.userCount === 1 ? 'entry' : 'entries'} saved in this browser.</div>
         )}
+
+        <section className="start-guide" aria-labelledby="start-guide-title">
+          <div className="start-guide-copy">
+            <span className="eyebrow">{data.preferences.dataMode === 'demo' ? 'Start here · about 2 minutes' : 'Your next step'}</span>
+            <h2 id="start-guide-title">{data.preferences.dataMode === 'demo' ? 'Follow a sample pattern from signal to suggestion.' : 'Build a picture that is personal to you.'}</h2>
+            <p>{data.preferences.dataMode === 'demo'
+              ? 'Explore clearly labeled example records first. Then switch to your private workspace whenever you are ready—sample values will not be mixed into it.'
+              : 'Log a brief reflection and, if useful, an activity snapshot. Trends and comparisons update from your records only.'}</p>
+          </div>
+          <div className="start-guide-actions">
+            <button className="guide-action primary" onClick={goToAction(data.preferences.dataMode === 'demo' ? 'insights' : 'checkin')}>
+              <span>01</span><strong>{data.preferences.dataMode === 'demo' ? 'Review a pattern' : 'Record a check-in'}</strong><ChevronRight size={16} />
+            </button>
+            <button className="guide-action" onClick={goToAction(data.preferences.dataMode === 'demo' ? 'demo' : 'activity')}>
+              <span>02</span><strong>{data.preferences.dataMode === 'demo' ? 'See how it works' : 'Add daily activity'}</strong><ChevronRight size={16} />
+            </button>
+            <button className="guide-action" onClick={goToAction(data.preferences.dataMode === 'demo' ? 'checkin' : 'history')}>
+              <span>03</span><strong>{data.preferences.dataMode === 'demo' ? 'Try a check-in' : 'Review your history'}</strong><ChevronRight size={16} />
+            </button>
+          </div>
+        </section>
 
         <div className="snapshot-heading">
           <div><span className="eyebrow">Today · {formatDate(today, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
@@ -740,9 +823,10 @@ function App() {
               </div>
             ) : <EmptyState title="No check-ins recorded today">There is no daily target. Add a reflection only if it is useful to you.</EmptyState>}
           </Panel>
-          <Panel eyebrow="Worth a look" title={priorityInsight?.title ?? 'Patterns at a glance'}
-            action={<button className="text-button" onClick={goToAction('insights')}>All insights <ChevronRight size={14} /></button>}>
-            {priorityInsight ? <InsightCard insight={priorityInsight} /> : <EmptyState title="More history needed">Add records over time for a personal comparison.</EmptyState>}
+          <Panel eyebrow="Next step" title="Explore your behavior patterns"
+            action={<button className="text-button" onClick={goToAction('insights')}>Open patterns <ChevronRight size={14} /></button>}>
+            <p className="panel-copy">Your baseline comparisons and explainable observations live on the Behavior Patterns page. Review the supporting activity and self-reported signals there.</p>
+            <p className="field-hint">Observations are descriptive, not alerts or diagnoses.</p>
           </Panel>
         </div>
       </>
@@ -754,6 +838,9 @@ function App() {
       <PageHeading page="checkin">
         <span className="privacy-inline"><ShieldCheck size={15} /> Stored in this browser</span>
       </PageHeading>
+      {data.preferences.dataMode === 'demo' && (
+        <div className="workspace-note"><Compass size={16} /><p>You are exploring sample records. Saving your first entry switches to Personal mode; the illustrative sample stays separate and unchanged.</p></div>
+      )}
       <div className="two-column-layout">
         <div className="form-stack">
           <Panel className="form-panel" eyebrow="Personal reflection" title={moodForm.editingId ? 'Edit this check-in' : 'How are you feeling?'}>
@@ -855,8 +942,10 @@ function App() {
                     <span>Mood {entry.mood} · Stress {entry.stress} · Energy {entry.energy} · Fatigue {entry.fatigue}</span>
                     {entry.note && <p>{entry.note}</p>}</div>
                   <div className="record-tools"><SourceBadge source={entry.source} />
-                    <button className="icon-button" aria-label="Edit check-in" title="Edit" onClick={() => editMood(entry)}><span className="visually-hidden">Edit check-in</span><Activity size={15} /></button>
-                    <button className="icon-button danger" aria-label="Delete check-in" title="Delete" onClick={() => deleteMood(entry)}><span className="visually-hidden">Delete check-in</span><X size={15} /></button>
+                    {entry.source === 'user' && <>
+                      <button className="icon-button" aria-label="Edit check-in" title="Edit" onClick={() => editMood(entry)}><span className="visually-hidden">Edit check-in</span><Activity size={15} /></button>
+                      <button className="icon-button danger" aria-label="Delete check-in" title="Delete" onClick={() => deleteMood(entry)}><span className="visually-hidden">Delete check-in</span><X size={15} /></button>
+                    </>}
                   </div>
                 </article>
               ))}
@@ -893,6 +982,9 @@ function App() {
     return (
       <>
         <PageHeading page="activity"><span className="privacy-inline"><Clock3 size={15} /> Manual entry only</span></PageHeading>
+        {data.preferences.dataMode === 'demo' && (
+          <div className="workspace-note"><Compass size={16} /><p>You are exploring sample records. Saving your first activity switches to Personal mode; sample data remains unchanged.</p></div>
+        )}
         <div className="two-column-layout activity-layout">
           <Panel className="form-panel" eyebrow="Daily activity" title={activityForm.editingId ? 'Edit activity entry' : 'Add a daily snapshot'}>
             <form onSubmit={saveActivity} className="form-stack">
@@ -945,8 +1037,10 @@ function App() {
                       {entry.notes && <p>{entry.notes}</p>}
                     </div>
                     <div className="record-tools"><SourceBadge source={entry.source} />
-                      <button className="icon-button" aria-label="Edit activity entry" title="Edit" onClick={() => editActivity(entry)}><span className="visually-hidden">Edit activity entry</span><Activity size={15} /></button>
-                      <button className="icon-button danger" aria-label="Delete activity entry" title="Delete" onClick={() => deleteActivity(entry)}><span className="visually-hidden">Delete activity entry</span><X size={15} /></button>
+                      {entry.source === 'user' && <>
+                        <button className="icon-button" aria-label="Edit activity entry" title="Edit" onClick={() => editActivity(entry)}><span className="visually-hidden">Edit activity entry</span><Activity size={15} /></button>
+                        <button className="icon-button danger" aria-label="Delete activity entry" title="Delete" onClick={() => deleteActivity(entry)}><span className="visually-hidden">Delete activity entry</span><X size={15} /></button>
+                      </>}
                     </div>
                   </article>
                 ))}
@@ -958,17 +1052,26 @@ function App() {
     );
   };
 
-  const renderInsights = () => (
-    <>
+  const renderInsights = () => {
+    const highlightedInsight = analysis.insights.find((insight) => insight.status === 'notice');
+    const highlightedDescription = highlightedInsight?.description ?? '';
+    const suggestedRecommendation = recommendations.find(
+      (recommendation) => highlightedInsight && recommendation.relatedInsightId === highlightedInsight.id,
+    ) ?? recommendations[0];
+    const recentActivity = orderedActivities.at(-1);
+    const recentCheckIn = orderedCheckIns.at(-1);
+    const hasEntries = visibleActivities.length > 0 || visibleCheckIns.length > 0;
+    return (
+      <>
       <PageHeading page="insights" />
       <div className="insight-overview-grid">
-        <Panel className="drift-panel" eyebrow="Personal activity pattern" title="Behavior drift">
+        <Panel className="drift-panel" eyebrow="Personal activity pattern" title="Routine variation index">
           <div className="drift-content">
-            <div className={`drift-number ${analysis.drift === null ? 'unavailable' : ''}`}>
-              {analysis.drift === null ? '—' : analysis.drift}<small>{analysis.drift === null ? '' : '/100'}</small>
+            <div className={`drift-number ${analysis.activityVariationIndex === null ? 'unavailable' : ''}`}>
+              {analysis.activityVariationIndex === null ? '—' : analysis.activityVariationIndex}<small>{analysis.activityVariationIndex === null ? '' : '/100'}</small>
             </div>
-            <div><strong>{analysis.drift === null ? 'Not enough comparable data' : 'Deviation from your recent routine'}</strong>
-              <p>This is a transparent activity-pattern deviation indicator, not a stress score, health measure, or prediction.</p>
+            <div><strong>{analysis.activityVariationIndex === null ? 'Not enough comparable data' : 'Deviation from your recent routine'}</strong>
+              <p>Describes how much your recorded activity averages differ from your earlier baseline. It is not a stress score, probability, health measure, or prediction.</p>
               <span className="field-hint">{baseline.reason}</span>
             </div>
           </div>
@@ -999,16 +1102,57 @@ function App() {
             </div>
           )}
         </Panel>
-        <Panel className="baseline-note" eyebrow="How to read this" title="Your routine is the reference">
-          <p>Each available measure compares your latest 7 days with the 21 days before that. A comparison appears only with at least 3 recent and 5 baseline records for that measure.</p>
-          <p>Behavior drift averages capped relative deviations for available activity measures (screen time, late-night use, breaks, and work/study). Missing measures are excluded; at least two comparisons are needed.</p>
-          <p>These are descriptive rules, not an AI model or clinical assessment. Screen time alone is never treated as proof of stress.</p>
+        <Panel className="pattern-suggestion" eyebrow="A next step for your pattern" title={suggestedRecommendation.title}>
+          <p className="pattern-suggestion-copy">{suggestedRecommendation.explanation}</p>
+          <div className="pattern-suggestion-action"><Check size={15} /><span>{suggestedRecommendation.suggestedAction}</span></div>
+          <small className="pattern-suggestion-evidence">Why this suggestion: {suggestedRecommendation.supportingObservation}</small>
+          <p className="pattern-suggestion-footnote">An optional, rule-based idea based on the {data.preferences.dataMode === 'demo' ? 'illustrative sample' : 'entries in your Personal workspace'}—not a diagnosis or a requirement.</p>
         </Panel>
       </div>
-      <div className="section-title"><div><span className="eyebrow">Explainable patterns</span><h2>What changed</h2></div><span>{analysis.insights.length} observations</span></div>
-      <div className="insight-grid">{analysis.insights.map((insight) => <InsightCard key={insight.id} insight={insight} />)}</div>
-    </>
-  );
+      <Panel
+        className="personal-pattern-panel"
+        eyebrow={data.preferences.dataMode === 'demo' ? 'From the illustrative sample' : `Personalized for ${data.preferences.profileName || 'you'}`}
+        title={highlightedInsight?.title ?? (hasEntries ? 'Your history is taking shape' : 'Start with your own pattern')}
+      >
+        {highlightedInsight ? (
+          <>
+            <p className="panel-copy">
+              {data.preferences.dataMode === 'demo' ? (
+                <>In the sample records, {highlightedDescription.slice(0, 1).toLowerCase()}{highlightedDescription.slice(1)}</>
+              ) : highlightedInsight.description}
+              {' '}{highlightedInsight.evidence}
+            </p>
+            <button className="button button-quiet" onClick={() => navigate('recommendations')}>Explore related suggestions <ChevronRight size={15} /></button>
+          </>
+        ) : hasEntries ? (
+          <p className="panel-copy">
+            You have {visibleActivities.length} activity {visibleActivities.length === 1 ? 'day' : 'days'} and {visibleCheckIns.length} {visibleCheckIns.length === 1 ? 'check-in' : 'check-ins'} in this workspace.
+            {recentActivity && ` Your latest activity entry is ${formatDate(recentActivity.date)} with ${recentActivity.totalScreenTime.toFixed(1)} hours of screen time.`}
+            {recentCheckIn && ` Your latest check-in recorded stress at ${recentCheckIn.stress}/5 and energy at ${recentCheckIn.energy}/5.`}
+            {' '}Comparisons appear as enough history builds: at least 3 recent and 5 earlier records for each measure.
+          </p>
+        ) : (
+          <p className="panel-copy">There are no entries in this workspace yet. Add a daily check-in or activity snapshot to begin; your personal patterns will be based only on entries saved in Personal.</p>
+        )}
+      </Panel>
+      <Panel className="pattern-observations" eyebrow="Explainable patterns" title="What changed">
+        <p className="panel-copy">These notes describe changes in the records you entered. They do not infer a diagnosis or explain the cause.</p>
+        <ul className="pattern-observation-list">
+          {analysis.insights.map((insight) => (
+            <li key={insight.id}>
+              <span className={`status-dot ${insight.status}`} aria-hidden="true" />
+              <div>
+                <strong>{insight.title}</strong>
+                <p>{insight.description}</p>
+                <small>{insight.evidence}</small>
+              </div>
+            </li>
+          ))}
+        </ul>
+      </Panel>
+      </>
+    );
+  };
 
   const renderRecommendations = () => (
     <>
@@ -1016,7 +1160,7 @@ function App() {
       <div className="recommendation-grid">
         {recommendations.map((recommendation) => (
           <article className="recommendation-card" key={recommendation.id}>
-            <div className={`recommendation-priority ${recommendation.priority}`}><Target size={15} /> {recommendation.priority}</div>
+            <div className={`recommendation-priority ${recommendation.priority}`}><Target size={15} /> {recommendationPriorityLabel(recommendation.priority)}</div>
             <h3>{recommendation.title}</h3><p>{recommendation.explanation}</p>
             <div className="recommendation-evidence"><strong>What this is based on</strong><span>{recommendation.supportingObservation}</span></div>
             <div className="recommendation-action"><Check size={16} /><span>{recommendation.suggestedAction}</span></div>
@@ -1048,17 +1192,12 @@ function App() {
               <button className="button button-quiet" onClick={goToAction('overview')}>View dashboard</button>
             </div>
           </Panel>
-          <Panel className="demo-live-panel" eyebrow="Live sample state" title="What the prototype currently sees">
+          <Panel className="demo-live-panel" eyebrow={data.preferences.dataMode === 'demo' ? 'Live sample state' : 'Live personal state'} title="What the current workspace shows">
             <div className="demo-live-values">
               <div><span>Today’s screen time</span><strong>{todayActivity ? `${todayActivity.totalScreenTime.toFixed(1)}h` : 'Not recorded'}</strong></div>
               <div><span>Most recent stress</span><strong>{latestTodayMood ? `${latestTodayMood.stress} / 5` : 'Not recorded'}</strong></div>
               <div><span>Most recent fatigue</span><strong>{latestTodayMood ? `${latestTodayMood.fatigue} / 5` : 'Not recorded'}</strong></div>
-              <div><span>Behavior drift</span><strong>{analysis.drift === null ? 'Insufficient history' : `${analysis.drift} / 100`}</strong></div>
-            </div>
-            <div className="demo-live-insight">
-              <span className="eyebrow">Current observation</span>
-              <strong>{analysis.insights[0]?.title ?? 'More history needed'}</strong>
-              <p>{analysis.insights[0]?.description ?? 'Record data over time to create a personal comparison.'}</p>
+              <div><span>Routine variation index</span><strong>{analysis.activityVariationIndex === null ? 'Insufficient history' : `${analysis.activityVariationIndex} / 100`}</strong></div>
             </div>
             <button className="text-button" onClick={goToAction('recommendations')}>See related suggestions <ChevronRight size={14} /></button>
           </Panel>
@@ -1156,7 +1295,7 @@ function App() {
                       <p><strong>{summary.activity.totalScreenTime.toFixed(1)}h</strong> total screen time</p>
                       <p>{summary.activity.lateNightUsage === undefined ? 'Late-night use not recorded' : `${summary.activity.lateNightUsage.toFixed(1)}h late-night`}
                         {' · '}{summary.activity.breaks === undefined ? 'Breaks not recorded' : `${summary.activity.breaks} breaks`}</p>
-                      <button className="text-button" onClick={() => { if (summary.activity) editActivity(summary.activity); }}>Edit activity <ChevronRight size={13} /></button>
+                      {summary.activity.source === 'user' && <button className="text-button" onClick={() => { if (summary.activity) editActivity(summary.activity); }}>Edit activity <ChevronRight size={13} /></button>}
                     </>
                   ) : <p className="missing-data">No activity record for this day.</p>}
                 </div>
@@ -1167,7 +1306,7 @@ function App() {
                       <div className="history-checkin-top"><strong>{getDayPeriod(entry.recordedAt)}</strong><span>{new Date(entry.recordedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span><SourceBadge source={entry.source} /></div>
                       <p>Mood {entry.mood}/5 · Stress {entry.stress}/5 · Energy {entry.energy}/5 · Fatigue {entry.fatigue}/5</p>
                       {entry.note && <p className="history-note">{entry.note}</p>}
-                      <div className="record-action-links"><button className="text-button" onClick={() => editMood(entry)}>Edit</button><button className="text-button danger-text" onClick={() => deleteMood(entry)}>Delete</button></div>
+                      {entry.source === 'user' && <div className="record-action-links"><button className="text-button" onClick={() => editMood(entry)}>Edit</button><button className="text-button danger-text" onClick={() => deleteMood(entry)}>Delete</button></div>}
                     </div>
                   )) : <p className="missing-data">No check-in recorded for this day.</p>}
                   <button className="text-button" onClick={() => { setMoodForm({ ...newMoodForm(), recordedAt: toLocalDateTimeInput(new Date(`${summary.date}T12:00:00`)) }); navigate('checkin'); }}>Add check-in <ChevronRight size={13} /></button>
@@ -1184,6 +1323,28 @@ function App() {
     <>
       <PageHeading page="settings" />
       <div className="settings-grid">
+        <Panel eyebrow="Your profile" title="Add your name">
+          <p className="panel-copy">Choose how your profile appears in the sidebar. This name is saved only in this browser.</p>
+          <form className="profile-name-form" onSubmit={saveProfileName}>
+            <label className="field" htmlFor="profile-name">
+              <span>Name</span>
+              <input
+                id="profile-name"
+                type="text"
+                autoComplete="nickname"
+                maxLength={40}
+                value={profileNameDraft}
+                placeholder="e.g. Alex"
+                onChange={(event) => {
+                  setProfileNameDraft(event.target.value);
+                  setProfileNameError('');
+                }}
+              />
+              {profileNameError && <span className="field-error">{profileNameError}</span>}
+            </label>
+            <div className="form-actions"><button className="button button-primary" type="submit">Save name <Check size={15} /></button></div>
+          </form>
+        </Panel>
         <Panel eyebrow="Appearance" title="Choose your theme">
           <p className="panel-copy">Your preference is saved with your local app data. First visit follows your device setting.</p>
           <div className="theme-picker" role="group" aria-label="Theme preference">
@@ -1192,8 +1353,13 @@ function App() {
           </div>
         </Panel>
         <Panel eyebrow="Data location" title="Local to this browser">
-          <div className="privacy-callout"><ShieldCheck size={18} /><p>Your records are stored in this browser’s local storage. This prototype does not sync to a server or send data to an AI service.</p></div>
+          <div className="privacy-callout"><ShieldCheck size={18} /><p>Your records are stored in this browser’s local storage. This version does not sync to a server or send data to external analysis services.</p></div>
           <ul className="privacy-list"><li>Clearing browser site data may remove your entries.</li><li>Do not use a shared device for sensitive notes.</li><li>No device tracking or automatic collection is used.</li></ul>
+        </Panel>
+        <Panel eyebrow="Separate workspaces" title="Choose what you are viewing">
+          <p className="panel-copy">Sample records help you explore the experience. Personal mode shows only entries you create. Switching workspaces never merges those records.</p>
+          {renderModeSwitch()}
+          <p className="field-hint">Current workspace: <strong>{data.preferences.dataMode === 'demo' ? 'Illustrative demo' : 'Personal entries'}</strong></p>
         </Panel>
         <Panel eyebrow="Your records" title="Data controls">
           <div className="data-counts"><div><strong>{sourceSummary.userCount}</strong><span>Personal entries</span></div><div><strong>{sourceSummary.demoCount}</strong><span>Sample entries</span></div></div>
@@ -1205,7 +1371,7 @@ function App() {
           <p className="field-hint">Clearing personal data keeps clearly labeled sample records. Restoring sample data replaces all saved entries.</p>
         </Panel>
         <Panel eyebrow="How observations work" title="Deterministic, not diagnostic">
-          <p className="panel-copy">MindTrace uses transparent TypeScript rules to compare recent entries with a personal baseline. It does not currently use an AI model, make predictions, or diagnose health conditions.</p>
+          <p className="panel-copy">MindTrace uses transparent rules to compare recent entries with a personal baseline. It does not use a trained predictive model, make predictions, or diagnose health conditions.</p>
           <p className="panel-copy">Patterns are descriptive and can be incomplete. A change in screen time or a self-reported rating is not proof of stress or a medical condition.</p>
           <div className="disclaimer">Wellness support only · Not medical advice</div>
         </Panel>
@@ -1252,7 +1418,12 @@ function App() {
             {data.preferences.theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
             <span>Switch to {data.preferences.theme === 'light' ? 'dark' : 'light'} theme</span>
           </button>
-          <div className="sidebar-disclaimer">A gentle reflection tool.<br />Not a clinical assessment.</div>
+          <div className="sidebar-profile">
+            <span className="sidebar-profile-mark" aria-hidden="true">
+              {(data.preferences.profileName.trim().charAt(0) || 'Y').toLocaleUpperCase()}
+            </span>
+            <div><strong>{data.preferences.profileName || 'Your profile'}</strong><small>Personal wellness</small></div>
+          </div>
         </div>
       </aside>
       {mobileMenuOpen && <button className="sidebar-scrim" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)} />}
@@ -1260,7 +1431,7 @@ function App() {
         <header className="topbar">
           <button className="menu-button icon-button" aria-label="Open navigation" onClick={() => setMobileMenuOpen(true)}><Menu size={20} /></button>
           <div className="breadcrumb"><ActiveIcon size={15} /><span>{navItems.find((item) => item.id === activePage)?.label}</span></div>
-          <div className="topbar-right"><span className="current-date"><CalendarDays size={15} />{formatDate(today, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+          <div className="topbar-right">{renderModeSwitch()}<span className="current-date"><CalendarDays size={15} />{formatDate(today, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
             <button className="theme-toggle icon-button" aria-label={`Switch to ${data.preferences.theme === 'light' ? 'dark' : 'light'} theme`}
               title={`Switch to ${data.preferences.theme === 'light' ? 'dark' : 'light'} theme`}
               onClick={() => setTheme(data.preferences.theme === 'light' ? 'dark' : 'light')}>
@@ -1271,10 +1442,10 @@ function App() {
         </header>
         <main id="main-content" className="main-content" tabIndex={-1}>
           {pageContent[activePage]()}
-          <footer className="app-footer"><span>MindTrace AI</span><span>Designed for reflection, not diagnosis.</span></footer>
+          <footer className="app-footer"><span>MindTrace</span><span>Designed for reflection, not diagnosis.</span></footer>
         </main>
       </div>
-      {notice && <div className={`notice ${/could not|failed|unavailable/i.test(notice) ? 'warning' : ''}`} role="status">
+      {notice && <div className={`app-notice ${/could not|failed|unavailable/i.test(notice) ? 'warning' : ''}`} role="status">
         <span>{/could not|failed|unavailable/i.test(notice) ? <ShieldCheck size={16} /> : <Check size={16} />}</span>{notice}
         <button aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={15} /></button>
       </div>}

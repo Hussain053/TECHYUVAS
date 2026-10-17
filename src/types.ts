@@ -10,6 +10,7 @@ export type AppPage =
 
 export type SourceKind = 'demo' | 'user';
 export type ThemePreference = 'light' | 'dark';
+export type DataMode = 'demo' | 'personal';
 export type InsightStatus = 'steady' | 'notice' | 'combined' | 'insufficient';
 
 export interface MoodCheckIn {
@@ -72,6 +73,8 @@ export interface Recommendation {
 
 export interface UserPreferences {
   theme: ThemePreference;
+  dataMode: DataMode;
+  profileName: string;
 }
 
 export interface AppData {
