@@ -1,247 +1,342 @@
-import type { ActivityEntry, BehaviorDriftResult, Insight, MoodCheckIn } from '../types';
+import type {
+  DailyActivity,
+  DailySummary,
+  InsightStatus,
+  MoodCheckIn,
+} from '../types';
 
-export const THRESHOLDS = {
-  screenTimeIncrease: 1.2,
-  lateNightIncrease: 0.8,
-  breakDecrease: 1,
-  stressIncrease: 1,
-  energyDecrease: 1,
-};
+export type DateRange = '7d' | '30d' | 'all';
 
-function roundToOne(value: number): number {
-  return Math.round(value * 10) / 10;
+const RECENT_DAYS = 7;
+const BASELINE_DAYS = 21;
+const MIN_RECENT_RECORDS = 3;
+const MIN_BASELINE_RECORDS = 5;
+
+export function localDateKey(date = new Date()): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
-function average(values: number[]): number {
-  if (values.length === 0) {
-    return 0;
-  }
-
-  return values.reduce((sum, value) => sum + value, 0) / values.length;
+export function formatDate(date: string, options?: Intl.DateTimeFormatOptions): string {
+  const parsed = new Date(`${date}T12:00:00`);
+  return new Intl.DateTimeFormat(undefined, options ?? { month: 'short', day: 'numeric' }).format(parsed);
 }
 
-export function sortByDate<T extends { date: string }>(items: T[]): T[] {
-  return [...items].sort((left, right) => left.date.localeCompare(right.date));
-}
-
-export function formatDateLabel(date: string): string {
-  const safeDate = new Date(`${date}T12:00:00`);
-  return new Intl.DateTimeFormat('en-US', {
+export function formatDateTime(value: string): string {
+  return new Intl.DateTimeFormat(undefined, {
     month: 'short',
     day: 'numeric',
-  }).format(safeDate);
+    hour: 'numeric',
+    minute: '2-digit',
+  }).format(new Date(value));
 }
 
-export function calculateSummaryMetrics(activityEntries: ActivityEntry[], moodEntries: MoodCheckIn[]) {
-  const sortedActivities = sortByDate(activityEntries);
-  const sortedMood = sortByDate(moodEntries);
-  const recentActivity = sortedActivities.slice(-7);
-  const recentMood = sortedMood.slice(-7);
+export function sortActivities(entries: DailyActivity[]): DailyActivity[] {
+  return [...entries].sort((a, b) => a.date.localeCompare(b.date));
+}
 
+export function sortCheckIns(entries: MoodCheckIn[]): MoodCheckIn[] {
+  return [...entries].sort((a, b) => a.recordedAt.localeCompare(b.recordedAt));
+}
+
+export function getDayPeriod(value: string): 'Morning' | 'Afternoon' | 'Evening' {
+  const hour = new Date(value).getHours();
+  if (hour < 12) return 'Morning';
+  if (hour < 17) return 'Afternoon';
+  return 'Evening';
+}
+
+function average(values: number[]): number | null {
+  return values.length ? values.reduce((sum, value) => sum + value, 0) / values.length : null;
+}
+
+export function buildDailySummaries(
+  activities: DailyActivity[],
+  checkIns: MoodCheckIn[],
+): DailySummary[] {
+  const activityByDate = new Map(activities.map((item) => [item.date, item]));
+  const moodsByDate = new Map<string, MoodCheckIn[]>();
+  for (const item of checkIns) {
+    const items = moodsByDate.get(item.date) ?? [];
+    items.push(item);
+    moodsByDate.set(item.date, items);
+  }
+  const dates = new Set([...activityByDate.keys(), ...moodsByDate.keys()]);
+
+  return [...dates].sort().map((date) => {
+    const dailyCheckIns = sortCheckIns(moodsByDate.get(date) ?? []);
+    return {
+      date,
+      activity: activityByDate.get(date) ?? null,
+      checkIns: dailyCheckIns,
+      averageMood: average(dailyCheckIns.map((item) => item.mood)),
+      averageStress: average(dailyCheckIns.map((item) => item.stress)),
+      averageEnergy: average(dailyCheckIns.map((item) => item.energy)),
+      averageFatigue: average(dailyCheckIns.map((item) => item.fatigue)),
+    };
+  });
+}
+
+export function filterByRange<T extends { date: string }>(items: T[], range: DateRange): T[] {
+  if (range === 'all') return items;
+  const days = range === '7d' ? 7 : 30;
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  start.setDate(start.getDate() - (days - 1));
+  const startKey = localDateKey(start);
+  const endKey = localDateKey();
+  return items.filter((item) => item.date >= startKey && item.date <= endKey);
+}
+
+export interface MetricComparison {
+  metric: string;
+  recent: number;
+  baseline: number;
+  unit: string;
+}
+
+export interface BaselineAnalysis {
+  available: boolean;
+  reason: string;
+  latestDate: string | null;
+  activityComparisons: MetricComparison[];
+  moodComparisons: MetricComparison[];
+}
+
+function compareNumericMetric(
+  entries: DailyActivity[],
+  metric: keyof Pick<
+    DailyActivity,
+    'totalScreenTime' | 'lateNightUsage' | 'breaks' | 'workStudyHours'
+  >,
+  label: string,
+  unit: string,
+): MetricComparison | null {
+  const latest = entries.reduce((max, item) => item.date > max ? item.date : max, '');
+  if (!latest) return null;
+  const recentStart = new Date(`${latest}T12:00:00`);
+  recentStart.setDate(recentStart.getDate() - (RECENT_DAYS - 1));
+  const baselineStart = new Date(`${latest}T12:00:00`);
+  baselineStart.setDate(baselineStart.getDate() - (RECENT_DAYS + BASELINE_DAYS - 1));
+  const recentStartKey = localDateKey(recentStart);
+  const baselineStartKey = localDateKey(baselineStart);
+  const baselineEnd = new Date(recentStart);
+  baselineEnd.setDate(baselineEnd.getDate() - 1);
+  const baselineEndKey = localDateKey(baselineEnd);
+  const values = (start: string, end: string) =>
+    entries.filter((item) => item.date >= start && item.date <= end)
+      .map((item) => item[metric])
+      .filter((value): value is number => typeof value === 'number' && Number.isFinite(value));
+  const recentValues = values(recentStartKey, latest);
+  const baselineValues = values(baselineStartKey, baselineEndKey);
+  if (recentValues.length < MIN_RECENT_RECORDS || baselineValues.length < MIN_BASELINE_RECORDS) return null;
+  const recent = average(recentValues);
+  const baseline = average(baselineValues);
+  if (recent === null || baseline === null) return null;
+  return { metric: label, recent, baseline, unit };
+}
+
+function compareMoodMetric(
+  entries: MoodCheckIn[],
+  metric: 'stress' | 'energy' | 'fatigue' | 'mood',
+  label: string,
+): MetricComparison | null {
+  const latest = entries.reduce((max, item) => item.date > max ? item.date : max, '');
+  if (!latest) return null;
+  const recentStart = new Date(`${latest}T12:00:00`);
+  recentStart.setDate(recentStart.getDate() - (RECENT_DAYS - 1));
+  const baselineStart = new Date(`${latest}T12:00:00`);
+  baselineStart.setDate(baselineStart.getDate() - (RECENT_DAYS + BASELINE_DAYS - 1));
+  const baselineEnd = new Date(recentStart);
+  baselineEnd.setDate(baselineEnd.getDate() - 1);
+  const dailyValues = new Map<string, number[]>();
+  for (const item of entries) {
+    const values = dailyValues.get(item.date) ?? [];
+    values.push(item[metric]);
+    dailyValues.set(item.date, values);
+  }
+  const values = (start: string, end: string) => [...dailyValues.entries()]
+    .filter(([date]) => date >= start && date <= end)
+    .map(([, ratings]) => average(ratings))
+    .filter((value): value is number => value !== null);
+  const recentValues = values(localDateKey(recentStart), latest);
+  const baselineValues = values(localDateKey(baselineStart), localDateKey(baselineEnd));
+  if (recentValues.length < MIN_RECENT_RECORDS || baselineValues.length < MIN_BASELINE_RECORDS) return null;
+  const recent = average(recentValues);
+  const baseline = average(baselineValues);
+  return recent === null || baseline === null ? null : { metric: label, recent, baseline, unit: '/5' };
+}
+
+export function analyzeBaseline(
+  activities: DailyActivity[],
+  checkIns: MoodCheckIn[],
+): BaselineAnalysis {
+  const latestDate = [...activities, ...checkIns]
+    .map((item) => item.date)
+    .sort()
+    .at(-1) ?? null;
+  const activityComparisons = [
+    compareNumericMetric(activities, 'totalScreenTime', 'Screen time', 'h/day'),
+    compareNumericMetric(activities, 'lateNightUsage', 'Late-night use', 'h/day'),
+    compareNumericMetric(activities, 'breaks', 'Breaks', '/day'),
+    compareNumericMetric(activities, 'workStudyHours', 'Work / study', 'h/day'),
+  ].filter((item): item is MetricComparison => item !== null);
+  const moodComparisons = [
+    compareMoodMetric(checkIns, 'stress', 'Self-reported stress'),
+    compareMoodMetric(checkIns, 'energy', 'Self-reported energy'),
+    compareMoodMetric(checkIns, 'fatigue', 'Self-reported fatigue'),
+    compareMoodMetric(checkIns, 'mood', 'Mood'),
+  ].filter((item): item is MetricComparison => item !== null);
+  const available = activityComparisons.length > 0 || moodComparisons.length > 0;
   return {
-    avgScreenTime: roundToOne(average(sortedActivities.map((entry) => entry.totalScreenTime))),
-    avgMood: roundToOne(average(sortedMood.map((entry) => entry.mood))),
-    avgBreakCount: roundToOne(average(sortedActivities.map((entry) => entry.breaks))),
-    recentLateNight: roundToOne(average(recentActivity.map((entry) => entry.lateNightUsage))),
-    recentMoodAverage: recentMood.length
-      ? roundToOne(average(recentMood.map((entry) => entry.mood)))
-      : 0,
+    available,
+    reason: available
+      ? 'Recent 7 days are compared with the preceding 21 days. At least 3 recent and 5 baseline records are required for each measure.'
+      : 'More consistent history is needed: comparisons use the most recent 7 days and preceding 21 days, with at least 3 recent and 5 baseline records per measure.',
+    latestDate,
+    activityComparisons,
+    moodComparisons,
   };
 }
 
-export function buildScreenTimeChartData(activityEntries: ActivityEntry[]) {
-  return sortByDate(activityEntries).map((entry) => ({
-    date: formatDateLabel(entry.date),
-    screenTime: roundToOne(entry.totalScreenTime),
-  }));
-}
-
-export function buildMoodStressChartData(moodEntries: MoodCheckIn[]) {
-  return sortByDate(moodEntries).map((entry) => ({
-    date: formatDateLabel(entry.date),
-    mood: entry.mood,
-    stress: entry.stress,
-  }));
-}
-
-export function buildBehaviorChartData(activityEntries: ActivityEntry[]) {
-  return sortByDate(activityEntries).map((entry) => ({
-    date: formatDateLabel(entry.date),
-    lateNight: roundToOne(entry.lateNightUsage),
-    breaks: entry.breaks,
-  }));
-}
-
-export function getRecentActivityHighlights(activityEntries: ActivityEntry[]) {
-  return sortByDate(activityEntries)
-    .slice(-3)
-    .reverse()
-    .map((entry) => ({
-      date: formatDateLabel(entry.date),
-      summary: `${entry.totalScreenTime.toFixed(1)}h total screen time · ${entry.breaks} breaks`,
-    }));
-}
-
-function clamp(value: number, minimum: number, maximum: number): number {
-  return Math.min(maximum, Math.max(minimum, value));
-}
-
-export function generateInsights(activityEntries: ActivityEntry[], moodEntries: MoodCheckIn[]): Insight[] {
-  const sortedActivities = sortByDate(activityEntries);
-  const sortedMood = sortByDate(moodEntries);
-
-  if (sortedActivities.length === 0 || sortedMood.length === 0) {
-    return [
-      {
-        id: 'no-data',
-        title: 'Data is still being gathered',
-        description: 'Add a few mood check-ins and activity entries to unlock a more tailored view.',
-        recommendation: 'Use the daily forms to log the next few days so trends become more informative.',
-        priority: 'low',
-      },
-    ];
-  }
-
-  const recentActivity = sortedActivities.slice(-7);
-  const baselineActivity = sortedActivities.slice(0, Math.max(0, sortedActivities.length - 7));
-  const recentMood = sortedMood.slice(-7);
-  const baselineMood = sortedMood.slice(0, Math.max(0, sortedMood.length - 7));
-
-  const recentAvgScreen = average(recentActivity.map((entry) => entry.totalScreenTime));
-  const baselineAvgScreen = average(baselineActivity.map((entry) => entry.totalScreenTime));
-  const recentAvgLateNight = average(recentActivity.map((entry) => entry.lateNightUsage));
-  const baselineAvgLateNight = average(baselineActivity.map((entry) => entry.lateNightUsage));
-  const recentAvgBreaks = average(recentActivity.map((entry) => entry.breaks));
-  const baselineAvgBreaks = average(baselineActivity.map((entry) => entry.breaks));
-  const recentAvgStress = average(recentMood.map((entry) => entry.stress));
-  const baselineAvgStress = average(baselineMood.map((entry) => entry.stress));
-  const recentAvgEnergy = average(recentMood.map((entry) => entry.energy));
-  const baselineAvgEnergy = average(baselineMood.map((entry) => entry.energy));
-
-  const insights: Insight[] = [];
-
-  if (baselineAvgScreen > 0 && recentAvgScreen > baselineAvgScreen + THRESHOLDS.screenTimeIncrease) {
-    insights.push({
-      id: 'screen-time-rise',
-      title: 'Screen time is running above your recent rhythm',
-      description: `Your average screen time was ${roundToOne(recentAvgScreen)}h over the past week, compared with ${roundToOne(baselineAvgScreen)}h in the earlier baseline window.`,
-      recommendation: 'Review your workload and schedule one shorter screen-free block before bed or during a break.',
-      priority: 'medium',
-    });
-  }
-
-  if (baselineAvgLateNight > 0 && recentAvgLateNight > baselineAvgLateNight + THRESHOLDS.lateNightIncrease) {
-    insights.push({
-      id: 'late-night-rise',
-      title: 'Late-night usage has climbed',
-      description: `Late-night screen use averaged ${roundToOne(recentAvgLateNight)}h recently, versus ${roundToOne(baselineAvgLateNight)}h before that.`,
-      recommendation: 'Try a screen-free wind-down period for 30 to 45 minutes before bed and keep your charger out of reach.',
-      priority: 'high',
-    });
-  }
-
-  if (baselineAvgBreaks > 0 && recentAvgBreaks < baselineAvgBreaks - THRESHOLDS.breakDecrease) {
-    insights.push({
-      id: 'break-frequency-drop',
-      title: 'Break frequency has dipped',
-      description: `You averaged ${roundToOne(recentAvgBreaks)} breaks in the recent window compared with ${roundToOne(baselineAvgBreaks)} in your baseline.`,
-      recommendation: 'Add a short reset every 60 to 90 minutes, even if it is as simple as standing up and stretching.',
-      priority: 'medium',
-    });
-  }
-
-  if (baselineAvgStress > 0 && recentAvgStress > baselineAvgStress + THRESHOLDS.stressIncrease) {
-    insights.push({
-      id: 'stress-increase',
-      title: 'Stress reports have moved upward',
-      description: `Self-reported stress averaged ${roundToOne(recentAvgStress)} recently, versus ${roundToOne(baselineAvgStress)} in the earlier pattern.`,
-      recommendation: 'Consider one gentle support habit, such as a walk, a short pause, or a less screen-heavy evening routine.',
-      priority: 'high',
-    });
-  }
-
-  if (baselineAvgEnergy > 0 && recentAvgEnergy < baselineAvgEnergy - THRESHOLDS.energyDecrease) {
-    insights.push({
-      id: 'energy-drop',
-      title: 'Energy has been trending lower',
-      description: `Your average energy rating was ${roundToOne(recentAvgEnergy)} recently compared with ${roundToOne(baselineAvgEnergy)} in your baseline.`,
-      recommendation: 'Reduce a small part of the evening load or protect this time for rest and recovery if you can.',
-      priority: 'medium',
-    });
-  }
-
-  if (
-    insights.length > 1 &&
-    recentAvgScreen > baselineAvgScreen + THRESHOLDS.screenTimeIncrease &&
-    recentAvgLateNight > baselineAvgLateNight + THRESHOLDS.lateNightIncrease &&
-    recentAvgBreaks < baselineAvgBreaks - THRESHOLDS.breakDecrease
-  ) {
-    insights.push({
-      id: 'combined-pattern',
-      title: 'Several changes are reinforcing each other',
-      description: 'Higher screen time, later-night usage, and fewer breaks are happening together in the same recent window.',
-      recommendation: 'Try a planned wind-down routine and add a short break before the next deep-focus session.',
-      priority: 'high',
-    });
-  }
-
-  if (insights.length === 0) {
-    insights.push({
-      id: 'stable-pattern',
-      title: 'No clear change is showing up right now',
-      description: 'Your recent measurements are staying fairly close to the routine seen in earlier entries.',
-      recommendation: 'Keep tracking, and revisit this view when routine changes or life events naturally shift your patterns.',
-      priority: 'low',
-    });
-  }
-
-  return insights.slice(0, 4);
-}
-
-export function getBehaviorDrift(activityEntries: ActivityEntry[]): BehaviorDriftResult {
-  const sorted = sortByDate(activityEntries);
-
-  if (sorted.length < 4) {
+export function buildInsights(analysis: BaselineAnalysis): {
+  insights: Array<{
+    id: string;
+    title: string;
+    description: string;
+    evidence: string;
+    status: InsightStatus;
+    metric?: string;
+    recentValue?: number;
+    baselineValue?: number;
+  }>;
+  drift: number | null;
+} {
+  if (!analysis.available) {
     return {
-      value: null,
-      label: 'Insufficient history',
-      explanation: 'We need at least four activity entries before a behavior-drift value can be calculated fairly.',
+      insights: [{
+        id: 'history-needed',
+        title: 'Build your personal baseline',
+        description: 'There is not enough comparable history yet to describe a recent change.',
+        evidence: analysis.reason,
+        status: 'insufficient',
+      }],
+      drift: null,
     };
   }
 
-  const recentEntries = sorted.slice(-Math.min(7, sorted.length));
-  const baselineEntries = sorted.slice(0, Math.max(2, Math.floor(sorted.length / 2)));
+  const insights: Array<{
+    id: string;
+    title: string;
+    description: string;
+    evidence: string;
+    status: InsightStatus;
+    metric?: string;
+    recentValue?: number;
+    baselineValue?: number;
+  }> = [];
+  const screen = analysis.activityComparisons.find((item) => item.metric === 'Screen time');
+  const lateNight = analysis.activityComparisons.find((item) => item.metric === 'Late-night use');
+  const breaks = analysis.activityComparisons.find((item) => item.metric === 'Breaks');
+  const stress = analysis.moodComparisons.find((item) => item.metric === 'Self-reported stress');
+  const energy = analysis.moodComparisons.find((item) => item.metric === 'Self-reported energy');
+  const fatigue = analysis.moodComparisons.find((item) => item.metric === 'Self-reported fatigue');
 
-  if (baselineEntries.length < 2) {
-    return {
-      value: null,
-      label: 'Insufficient history',
-      explanation: 'There is not enough earlier activity to compare the recent routine against a personal baseline yet.',
-    };
-  }
-
-  const recentAvgScreen = average(recentEntries.map((entry) => entry.totalScreenTime));
-  const baselineAvgScreen = average(baselineEntries.map((entry) => entry.totalScreenTime));
-  const recentAvgLateNight = average(recentEntries.map((entry) => entry.lateNightUsage));
-  const baselineAvgLateNight = average(baselineEntries.map((entry) => entry.lateNightUsage));
-  const recentAvgBreaks = average(recentEntries.map((entry) => entry.breaks));
-  const baselineAvgBreaks = average(baselineEntries.map((entry) => entry.breaks));
-
-  const screenShift = baselineAvgScreen > 0 ? Math.max(0, recentAvgScreen - baselineAvgScreen) / baselineAvgScreen : 0;
-  const lateNightShift = baselineAvgLateNight > 0 ? Math.max(0, recentAvgLateNight - baselineAvgLateNight) / baselineAvgLateNight : 0;
-  const breakDrop = baselineAvgBreaks > 0 ? Math.max(0, baselineAvgBreaks - recentAvgBreaks) / baselineAvgBreaks : 0;
-
-  const rawScore =
-    Math.min(screenShift, 1.5) * 35 +
-    Math.min(lateNightShift, 1.5) * 25 +
-    Math.min(breakDrop, 1.5) * 25 +
-    Math.min(Math.max(0, recentAvgLateNight - baselineAvgLateNight), 1.5) * 15;
-
-  const value = clamp(Math.round(rawScore), 0, 100);
-
-  return {
-    value,
-    label: `${value}/100`,
-    explanation: 'Behavior drift measures how much your recent activity pattern differs from your own baseline, without implying a clinical diagnosis.',
+  const addMetricInsight = (
+    id: string,
+    metric: MetricComparison | undefined,
+    direction: 'higher' | 'lower',
+    threshold: number,
+    description: string,
+    title: string,
+  ) => {
+    if (!metric) return;
+    const difference = metric.recent - metric.baseline;
+    const enoughChange = direction === 'higher'
+      ? difference >= threshold
+      : difference <= -threshold;
+    if (!enoughChange) return;
+    insights.push({
+      id,
+      title,
+      description,
+      evidence: `${metric.metric}: ${metric.recent.toFixed(1)}${metric.unit}, compared with ${metric.baseline.toFixed(1)}${metric.unit} in the prior baseline.`,
+      status: 'notice',
+      metric: metric.metric,
+      recentValue: metric.recent,
+      baselineValue: metric.baseline,
+    });
   };
+
+  addMetricInsight(
+    'screen-time-change',
+    screen,
+    'higher',
+    Math.max(1, (screen?.baseline ?? 0) * 0.2),
+    'Your recent average screen time is above your own earlier routine. Screen time alone does not indicate stress.',
+    'More screen time than your recent baseline',
+  );
+  addMetricInsight(
+    'late-night-change',
+    lateNight,
+    'higher',
+    Math.max(0.3, (lateNight?.baseline ?? 0) * 0.25),
+    'Late-night use has increased compared with your earlier entries. You might try a short screen-free wind-down if that feels useful.',
+    'Late-night use is higher',
+  );
+  addMetricInsight(
+    'breaks-change',
+    breaks,
+    'lower',
+    Math.max(1, (breaks?.baseline ?? 0) * 0.25),
+    'You logged fewer breaks than in your earlier routine. Short pauses can be a practical way to add breathing room.',
+    'Fewer breaks recorded',
+  );
+  addMetricInsight(
+    'stress-change',
+    stress,
+    'higher',
+    0.7,
+    'Your self-reported stress rating is higher than your own earlier check-ins.',
+    'Stress ratings have moved up',
+  );
+  addMetricInsight(
+    'energy-change',
+    energy,
+    'lower',
+    0.7,
+    'Your self-reported energy is lower than in earlier check-ins.',
+    'Energy ratings have moved down',
+  );
+  addMetricInsight(
+    'fatigue-change',
+    fatigue,
+    'higher',
+    0.7,
+    'You have reported more fatigue than in earlier check-ins.',
+    'Fatigue ratings have moved up',
+  );
+
+  const driftMeasures = analysis.activityComparisons.slice(0, 4);
+  const drift = driftMeasures.length >= 2
+    ? Math.round(driftMeasures.reduce((sum, item) => {
+      const relativeChange = Math.abs(item.recent - item.baseline) / Math.max(Math.abs(item.baseline), 1);
+      return sum + Math.min(relativeChange, 1);
+    }, 0) / driftMeasures.length * 100)
+    : null;
+  if (insights.length > 1) {
+    for (const insight of insights) insight.status = 'combined';
+  }
+  if (!insights.length) {
+    insights.push({
+      id: 'within-range',
+      title: 'Recent patterns are near your baseline',
+      description: 'No notable changes crossed the explainable thresholds in the available comparisons.',
+      evidence: analysis.reason,
+      status: 'steady',
+    });
+  }
+  return { insights, drift };
 }

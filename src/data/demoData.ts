@@ -1,283 +1,102 @@
-import type { ActivityEntry, MoodCheckIn } from '../types';
+import type { DailyActivity, MoodCheckIn } from '../types';
 
-export const demoMoodCheckIns: MoodCheckIn[] = [
-  {
-    id: 'demo-mood-01',
-    date: '2025-05-06',
-    mood: 4,
-    stress: 2,
-    energy: 4,
-    fatigue: 2,
-    note: 'A solid start to the week and enough time to reset.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-02',
-    date: '2025-05-07',
-    mood: 3,
-    stress: 3,
-    energy: 3,
-    fatigue: 3,
-    note: 'A heavier workload left me feeling drained by evening.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-03',
-    date: '2025-05-08',
-    mood: 2,
-    stress: 4,
-    energy: 2,
-    fatigue: 4,
-    note: 'Stress was high and I needed more room to recover.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-04',
-    date: '2025-05-09',
-    mood: 4,
-    stress: 2,
-    energy: 4,
-    fatigue: 2,
-    note: 'A calmer day with time away from my screens.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-05',
-    date: '2025-05-10',
-    mood: 3,
-    stress: 3,
-    energy: 3,
-    fatigue: 3,
-    note: 'Balanced but a little mentally scattered after lunch.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-06',
-    date: '2025-05-11',
-    mood: 5,
-    stress: 1,
-    energy: 5,
-    fatigue: 1,
-    note: 'I felt productive, rested, and calm.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-07',
-    date: '2025-05-12',
-    mood: 3,
-    stress: 3,
-    energy: 3,
-    fatigue: 3,
-    note: 'General fatigue built up across the day.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-08',
-    date: '2025-05-13',
-    mood: 2,
-    stress: 4,
-    energy: 2,
-    fatigue: 4,
-    note: 'Late-night browsing made it harder to recover.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-09',
-    date: '2025-05-14',
-    mood: 4,
-    stress: 2,
-    energy: 4,
-    fatigue: 2,
-    note: 'A more grounded day with better routines.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-10',
-    date: '2025-05-15',
-    mood: 3,
-    stress: 3,
-    energy: 3,
-    fatigue: 3,
-    note: 'A moderate day with scattered focus and a few screens late at night.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-11',
-    date: '2025-05-16',
-    mood: 4,
-    stress: 2,
-    energy: 4,
-    fatigue: 2,
-    note: 'A smoother rhythm and lighter cognitive load.',
-    source: 'demo',
-  },
-  {
-    id: 'demo-mood-12',
-    date: '2025-05-17',
-    mood: 5,
-    stress: 1,
-    energy: 5,
-    fatigue: 1,
-    note: 'Felt refreshed after taking real breaks and ending screens earlier.',
-    source: 'demo',
-  },
+function localDate(daysAgo: number): Date {
+  const value = new Date();
+  value.setHours(12, 0, 0, 0);
+  value.setDate(value.getDate() - daysAgo);
+  return value;
+}
+
+function dateKey(value: Date): string {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, '0');
+  const day = String(value.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
+const activityPatterns = [
+  [6.8, 3.2, 1.2, 1.4, 0.5, 4],
+  [7.6, 3.8, 1.6, 1.5, 0.9, 3],
+  [8.2, 4.1, 1.8, 1.7, 1.2, 2],
+  [6.4, 2.9, 1.1, 1.3, 0.4, 5],
+  [7.1, 3.4, 1.5, 1.2, 0.7, 4],
+  [5.9, 2.3, 1.0, 1.4, 0.3, 5],
+  [7.4, 3.6, 1.7, 1.4, 0.8, 3],
 ];
 
-export const demoActivityEntries: ActivityEntry[] = [
-  {
-    id: 'demo-activity-01',
-    date: '2025-05-06',
-    totalScreenTime: 7.1,
-    activeWorkHours: 3.1,
-    socialMediaHours: 1.5,
-    entertainmentHours: 1.7,
-    lateNightUsage: 0.9,
-    breaks: 3,
-    averageBreakMinutes: 18,
-    tasksCompleted: 8,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-02',
-    date: '2025-05-07',
-    totalScreenTime: 8.2,
-    activeWorkHours: 3.8,
-    socialMediaHours: 2.0,
-    entertainmentHours: 1.7,
-    lateNightUsage: 1.5,
-    breaks: 2,
-    averageBreakMinutes: 14,
-    tasksCompleted: 7,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-03',
-    date: '2025-05-08',
-    totalScreenTime: 9.1,
-    activeWorkHours: 4.1,
-    socialMediaHours: 2.3,
-    entertainmentHours: 1.8,
-    lateNightUsage: 2.1,
-    breaks: 1,
-    averageBreakMinutes: 9,
-    tasksCompleted: 6,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-04',
-    date: '2025-05-09',
-    totalScreenTime: 6.4,
-    activeWorkHours: 2.7,
-    socialMediaHours: 1.4,
-    entertainmentHours: 1.7,
-    lateNightUsage: 0.7,
-    breaks: 4,
-    averageBreakMinutes: 21,
-    tasksCompleted: 9,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-05',
-    date: '2025-05-10',
-    totalScreenTime: 7.6,
-    activeWorkHours: 3.3,
-    socialMediaHours: 1.8,
-    entertainmentHours: 1.9,
-    lateNightUsage: 1.0,
-    breaks: 3,
-    averageBreakMinutes: 17,
-    tasksCompleted: 8,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-06',
-    date: '2025-05-11',
-    totalScreenTime: 5.9,
-    activeWorkHours: 2.5,
-    socialMediaHours: 1.4,
-    entertainmentHours: 1.5,
-    lateNightUsage: 0.4,
-    breaks: 4,
-    averageBreakMinutes: 24,
-    tasksCompleted: 10,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-07',
-    date: '2025-05-12',
-    totalScreenTime: 7.9,
-    activeWorkHours: 3.6,
-    socialMediaHours: 1.7,
-    entertainmentHours: 1.8,
-    lateNightUsage: 1.2,
-    breaks: 2,
-    averageBreakMinutes: 15,
-    tasksCompleted: 7,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-08',
-    date: '2025-05-13',
-    totalScreenTime: 8.6,
-    activeWorkHours: 3.7,
-    socialMediaHours: 2.2,
-    entertainmentHours: 1.9,
-    lateNightUsage: 2.3,
-    breaks: 1,
-    averageBreakMinutes: 10,
-    tasksCompleted: 5,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-09',
-    date: '2025-05-14',
-    totalScreenTime: 6.8,
-    activeWorkHours: 2.8,
-    socialMediaHours: 1.6,
-    entertainmentHours: 1.6,
-    lateNightUsage: 0.8,
-    breaks: 3,
-    averageBreakMinutes: 19,
-    tasksCompleted: 8,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-10',
-    date: '2025-05-15',
-    totalScreenTime: 7.5,
-    activeWorkHours: 3.2,
-    socialMediaHours: 1.9,
-    entertainmentHours: 1.7,
-    lateNightUsage: 1.4,
-    breaks: 2,
-    averageBreakMinutes: 16,
-    tasksCompleted: 7,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-11',
-    date: '2025-05-16',
-    totalScreenTime: 6.1,
-    activeWorkHours: 2.9,
-    socialMediaHours: 1.3,
-    entertainmentHours: 1.4,
-    lateNightUsage: 0.6,
-    breaks: 4,
-    averageBreakMinutes: 22,
-    tasksCompleted: 9,
-    source: 'demo',
-  },
-  {
-    id: 'demo-activity-12',
-    date: '2025-05-17',
-    totalScreenTime: 5.4,
-    activeWorkHours: 2.4,
-    socialMediaHours: 1.2,
-    entertainmentHours: 1.2,
-    lateNightUsage: 0.5,
-    breaks: 5,
-    averageBreakMinutes: 25,
-    tasksCompleted: 10,
-    source: 'demo',
-  },
+const moodPatterns = [
+  [4, 2, 4, 2],
+  [3, 3, 3, 3],
+  [2, 4, 2, 4],
+  [4, 2, 4, 2],
+  [3, 3, 3, 3],
+  [5, 1, 5, 1],
+  [4, 2, 4, 2],
 ];
+
+export const demoActivityEntries: DailyActivity[] = Array.from({ length: 28 }, (_, index) => {
+  const daysAgo = 27 - index;
+  const date = dateKey(localDate(daysAgo));
+  const [baseScreenTime, baseWorkStudyHours, socialMediaHours, entertainmentHours, baseLateNightUsage, baseBreaks] =
+    activityPatterns[daysAgo % activityPatterns.length];
+  const recentShift = daysAgo < 7;
+  const totalScreenTime = baseScreenTime + (recentShift ? 1.8 : 0);
+  const workStudyHours = baseWorkStudyHours + (recentShift ? 0.3 : 0);
+  const lateNightUsage = baseLateNightUsage + (recentShift ? 0.7 : 0);
+  const breaks = Math.max(0, baseBreaks - (recentShift ? 2 : 0));
+
+  return {
+    id: `demo-activity-${date}`,
+    date,
+    totalScreenTime,
+    workStudyHours,
+    socialMediaHours,
+    entertainmentHours,
+    lateNightUsage,
+    breaks,
+    averageBreakMinutes: breaks > 0 ? 12 + (daysAgo % 4) * 3 : undefined,
+    tasksCompleted: 4 + (daysAgo % 6),
+    source: 'demo',
+  };
+});
+
+export const demoMoodCheckIns: MoodCheckIn[] = Array.from({ length: 28 }, (_, index) => {
+  const daysAgo = 27 - index;
+  const date = dateKey(localDate(daysAgo));
+  const [baseMood, baseStress, baseEnergy, baseFatigue] = moodPatterns[daysAgo % moodPatterns.length];
+  const recentShift = daysAgo < 7;
+  const mood = Math.max(1, baseMood - (recentShift ? 1 : 0));
+  const stress = Math.min(5, baseStress + (recentShift ? 1 : 0));
+  const energy = Math.max(1, baseEnergy - (recentShift ? 1 : 0));
+  const fatigue = Math.min(5, baseFatigue + (recentShift ? 1 : 0));
+  const checkInDate = localDate(daysAgo);
+  checkInDate.setHours(index % 4 === 0 ? 9 : index % 3 === 0 ? 20 : 14, 0, 0, 0);
+
+  return {
+    id: `demo-mood-${date}`,
+    date,
+    recordedAt: checkInDate.toISOString(),
+    mood,
+    stress,
+    energy,
+    fatigue,
+    note: '',
+    source: 'demo',
+  };
+});
+
+demoMoodCheckIns.push({
+  id: 'demo-mood-today',
+  date: dateKey(localDate(0)),
+  recordedAt: (() => {
+    const value = localDate(0);
+    value.setHours(Math.min(9, new Date().getHours()), 0, 0, 0);
+    return value.toISOString();
+  })(),
+  mood: 4,
+  stress: 2,
+  energy: 3,
+  fatigue: 2,
+  note: 'Taking a moment to notice how I feel today.',
+  source: 'demo',
+});

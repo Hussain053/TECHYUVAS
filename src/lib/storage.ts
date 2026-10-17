@@ -1,16 +1,30 @@
 import { demoActivityEntries, demoMoodCheckIns } from '../data/demoData';
-import type { ActivityEntry, MoodCheckIn } from '../types';
+import type {
+  AppData,
+  DailyActivity,
+  MoodCheckIn,
+  ThemePreference,
+} from '../types';
 
-export const STORAGE_KEYS = {
-  moodEntries: 'mindtrace.moodEntries',
-  activityEntries: 'mindtrace.activityEntries',
-} as const;
+export const STORAGE_KEY = 'mindtrace.app-data.v2';
+const LEGACY_MOOD_KEY = 'mindtrace.moodEntries';
+const LEGACY_ACTIVITY_KEY = 'mindtrace.activityEntries';
+const LEGACY_THEME_KEY = 'mindtrace.theme';
 
-function getStorage(): Storage | null {
-  if (typeof window === 'undefined') {
-    return null;
+export interface LoadedAppData {
+  data: AppData;
+  warning: string | null;
+}
+
+const defaultTheme = (): ThemePreference => {
+  if (typeof window !== 'undefined' && window.matchMedia?.('(prefers-color-scheme: dark)').matches) {
+    return 'dark';
   }
+  return 'light';
+};
 
+function localStorageOrNull(): Storage | null {
+  if (typeof window === 'undefined') return null;
   try {
     return window.localStorage;
   } catch {
@@ -18,108 +32,174 @@ function getStorage(): Storage | null {
   }
 }
 
-function readStored<T>(key: string, fallback: T): T {
-  const storage = getStorage();
+function isDateKey(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function isRating(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 1 && value <= 5;
+}
+
+function isOptionalNumber(value: unknown, max: number): value is number | undefined {
+  return value === undefined || (
+    typeof value === 'number' && Number.isFinite(value) && value >= 0 && value <= max
+  );
+}
+
+function isMoodCheckIn(value: unknown): value is MoodCheckIn {
+  if (typeof value !== 'object' || value === null) return false;
+  const item = value as Partial<MoodCheckIn>;
+  return typeof item.id === 'string'
+    && isDateKey(item.date)
+    && (typeof item.recordedAt === 'string' || item.recordedAt === undefined)
+    && isRating(item.mood)
+    && isRating(item.stress)
+    && isRating(item.energy)
+    && isRating(item.fatigue)
+    && typeof (item.note ?? '') === 'string'
+    && (item.source === 'demo' || item.source === 'user');
+}
+
+function isDailyActivity(value: unknown): value is DailyActivity {
+  if (typeof value !== 'object' || value === null) return false;
+  const item = value as Partial<DailyActivity>;
+  return typeof item.id === 'string'
+    && isDateKey(item.date)
+    && isOptionalNumber(item.totalScreenTime, 24)
+    && typeof item.totalScreenTime === 'number'
+    && isOptionalNumber(item.workStudyHours, 24)
+    && isOptionalNumber(item.socialMediaHours, 24)
+    && isOptionalNumber(item.entertainmentHours, 24)
+    && isOptionalNumber(item.lateNightUsage, 24)
+    && isOptionalNumber(item.breaks, 100)
+    && isOptionalNumber(item.averageBreakMinutes, 240)
+    && isOptionalNumber(item.tasksCompleted, 1000)
+    && typeof (item.notes ?? '') === 'string'
+    && (item.source === 'demo' || item.source === 'user');
+}
+
+function withLegacyTimestamp(item: MoodCheckIn): MoodCheckIn {
+  return {
+    ...item,
+    recordedAt: item.recordedAt && Number.isFinite(Date.parse(item.recordedAt))
+      ? item.recordedAt
+      : new Date(`${item.date}T12:00:00`).toISOString(),
+    note: item.note ?? '',
+  };
+}
+
+function isTheme(value: unknown): value is ThemePreference {
+  return value === 'light' || value === 'dark';
+}
+
+function fromLegacyStorage(storage: Storage): { data: AppData | null; warning: string | null } {
+  const rawMood = storage.getItem(LEGACY_MOOD_KEY);
+  const rawActivity = storage.getItem(LEGACY_ACTIVITY_KEY);
+  if (!rawMood && !rawActivity) return { data: null, warning: null };
+
+  try {
+    const moods: unknown = rawMood ? JSON.parse(rawMood) : [];
+    const activities: unknown = rawActivity ? JSON.parse(rawActivity) : [];
+    if (!Array.isArray(moods) || !moods.every(isMoodCheckIn)
+      || !Array.isArray(activities) || !activities.every(isDailyActivity)) {
+      return {
+        data: null,
+        warning: 'Previous saved records did not pass validation. Sample data is shown instead.',
+      };
+    }
+    const rawTheme = storage.getItem(LEGACY_THEME_KEY);
+    const personalMoods = moods.filter((item) => item.source === 'user').map(withLegacyTimestamp);
+    const personalActivities = activities.filter((item) => item.source === 'user');
+    const personalActivityDates = new Set(personalActivities.map((item) => item.date));
+    return {
+      data: {
+        moodCheckIns: [...demoMoodCheckIns, ...personalMoods],
+        activityEntries: [
+          ...demoActivityEntries.filter((item) => !personalActivityDates.has(item.date)),
+          ...personalActivities,
+        ],
+        preferences: { theme: isTheme(rawTheme) ? rawTheme : defaultTheme() },
+      },
+      warning: null,
+    };
+  } catch (error) {
+    return {
+      data: null,
+      warning: `Previous saved records could not be read: ${error instanceof Error ? error.message : 'unknown storage error'}. Sample data is shown instead.`,
+    };
+  }
+}
+
+export function loadAppData(): LoadedAppData {
+  const storage = localStorageOrNull();
+  const fallback: AppData = {
+    moodCheckIns: demoMoodCheckIns,
+    activityEntries: demoActivityEntries,
+    preferences: { theme: defaultTheme() },
+  };
 
   if (!storage) {
-    return fallback;
+    return {
+      data: fallback,
+      warning: 'Browser storage is unavailable. Changes will not persist after this session.',
+    };
   }
 
   try {
-    const rawValue = storage.getItem(key);
-
-    if (!rawValue) {
-      return fallback;
+    const raw = storage.getItem(STORAGE_KEY);
+    if (!raw) {
+      const migrated = fromLegacyStorage(storage);
+      return { data: migrated.data ?? fallback, warning: migrated.warning };
     }
 
-    const parsedValue = JSON.parse(rawValue) as T;
-    return parsedValue;
-  } catch {
-    return fallback;
+    const parsed: unknown = JSON.parse(raw);
+    if (typeof parsed !== 'object' || parsed === null) throw new Error('Saved data has an invalid shape.');
+    const saved = parsed as Partial<AppData>;
+    if (!Array.isArray(saved.moodCheckIns) || !saved.moodCheckIns.every(isMoodCheckIn)
+      || !Array.isArray(saved.activityEntries) || !saved.activityEntries.every(isDailyActivity)
+      || typeof saved.preferences !== 'object' || saved.preferences === null
+      || !isTheme(saved.preferences.theme)) {
+      throw new Error('Saved data did not pass validation.');
+    }
+    return {
+      data: {
+        moodCheckIns: saved.moodCheckIns.map(withLegacyTimestamp),
+        activityEntries: saved.activityEntries,
+        preferences: saved.preferences,
+      },
+      warning: null,
+    };
+  } catch (error) {
+    return {
+      data: fallback,
+      warning: `Saved data could not be read safely: ${error instanceof Error ? error.message : 'unknown storage error'}`,
+    };
   }
 }
 
-function writeStored<T>(key: string, value: T): void {
-  const storage = getStorage();
-
+export function saveAppData(data: AppData): void {
+  const storage = localStorageOrNull();
   if (!storage) {
-    return;
+    throw new Error('Browser storage is unavailable. Changes cannot be saved.');
   }
-
   try {
-    storage.setItem(key, JSON.stringify(value));
-  } catch {
-    return;
+    storage.setItem(STORAGE_KEY, JSON.stringify(data));
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'unknown storage error';
+    throw new Error(`Could not save your data in this browser: ${message}`);
   }
 }
 
-function isMoodEntry(value: unknown): value is MoodCheckIn {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-
-  const candidate = value as Partial<MoodCheckIn>;
-  return (
-    typeof candidate.id === 'string' &&
-    typeof candidate.date === 'string' &&
-    typeof candidate.note === 'string' &&
-    typeof candidate.mood === 'number' &&
-    typeof candidate.stress === 'number' &&
-    typeof candidate.energy === 'number' &&
-    typeof candidate.fatigue === 'number' &&
-    (candidate.source === 'demo' || candidate.source === 'user')
-  );
-}
-
-function isActivityEntry(value: unknown): value is ActivityEntry {
-  if (typeof value !== 'object' || value === null) {
-    return false;
-  }
-
-  const candidate = value as Partial<ActivityEntry>;
-  return (
-    typeof candidate.id === 'string' &&
-    typeof candidate.date === 'string' &&
-    typeof candidate.totalScreenTime === 'number' &&
-    typeof candidate.activeWorkHours === 'number' &&
-    typeof candidate.socialMediaHours === 'number' &&
-    typeof candidate.entertainmentHours === 'number' &&
-    typeof candidate.lateNightUsage === 'number' &&
-    typeof candidate.breaks === 'number' &&
-    typeof candidate.averageBreakMinutes === 'number' &&
-    typeof candidate.tasksCompleted === 'number' &&
-    (candidate.source === 'demo' || candidate.source === 'user')
-  );
-}
-
-export function loadMoodEntries(): MoodCheckIn[] {
-  const stored = readStored<MoodCheckIn[]>(STORAGE_KEYS.moodEntries, demoMoodCheckIns);
-
-  if (!Array.isArray(stored) || stored.some((item) => !isMoodEntry(item))) {
-    return demoMoodCheckIns;
-  }
-
-  return stored;
-}
-
-export function loadActivityEntries(): ActivityEntry[] {
-  const stored = readStored<ActivityEntry[]>(STORAGE_KEYS.activityEntries, demoActivityEntries);
-
-  if (!Array.isArray(stored) || stored.some((item) => !isActivityEntry(item))) {
-    return demoActivityEntries;
-  }
-
-  return stored;
-}
-
-export function persistEntries(moodEntries: MoodCheckIn[], activityEntries: ActivityEntry[]): void {
-  writeStored(STORAGE_KEYS.moodEntries, moodEntries);
-  writeStored(STORAGE_KEYS.activityEntries, activityEntries);
-}
-
-export function restoreDemoEntries(): { moodEntries: MoodCheckIn[]; activityEntries: ActivityEntry[] } {
+export function restoreDemoData(): AppData {
   return {
-    moodEntries: demoMoodCheckIns,
-    activityEntries: demoActivityEntries,
+    moodCheckIns: demoMoodCheckIns.map((item) => ({ ...item })),
+    activityEntries: demoActivityEntries.map((item) => ({ ...item })),
+    preferences: { theme: defaultTheme() },
   };
+}
+
+export function isDemoRecord(source: MoodCheckIn | DailyActivity): boolean {
+  return source.source === 'demo';
 }

@@ -1,28 +1,28 @@
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from 'react';
 import {
   Activity,
-  BrainCircuit,
+  ArrowDownRight,
+  ArrowUpRight,
+  BarChart3,
+  Brain,
   CalendarDays,
-  CheckCircle2,
+  Check,
   ChevronRight,
   Clock3,
-  HeartPulse,
-  LayoutGrid,
+  Compass,
+  Download,
+  Heart,
+  LayoutDashboard,
   Menu,
-  MoonStar,
-  NotebookPen,
-  RefreshCcw,
+  Moon,
+  Plus,
   ShieldCheck,
-  Sparkles,
+  Sun,
   Target,
-  TrendingUp,
   X,
 } from 'lucide-react';
 import {
-  Bar,
-  BarChart,
   CartesianGrid,
-  ComposedChart,
   Legend,
   Line,
   LineChart,
@@ -32,1098 +32,1252 @@ import {
   YAxis,
 } from 'recharts';
 import './App.css';
-import { loadActivityEntries, loadMoodEntries, persistEntries, restoreDemoEntries } from './lib/storage';
 import {
-  buildBehaviorChartData,
-  buildMoodStressChartData,
-  buildScreenTimeChartData,
-  calculateSummaryMetrics,
-  generateInsights,
-  getBehaviorDrift,
-  getRecentActivityHighlights,
-  sortByDate,
+  analyzeBaseline,
+  buildDailySummaries,
+  buildInsights,
+  filterByRange,
+  formatDate,
+  formatDateTime,
+  getDayPeriod,
+  localDateKey,
+  sortActivities,
+  sortCheckIns,
+  type DateRange,
 } from './lib/analysis';
-import type { ActivityEntry, MoodCheckIn, NavPage } from './types';
+import { buildRecommendations } from './lib/recommendations';
+import { loadAppData, restoreDemoData, saveAppData } from './lib/storage';
+import type {
+  AppData,
+  AppPage,
+  BehaviorInsight,
+  DailyActivity,
+  MoodCheckIn,
+  ThemePreference,
+} from './types';
 
-type MoodFormState = {
-  date: string;
-  mood: string;
-  stress: string;
-  energy: string;
-  fatigue: string;
+const navItems: Array<{ id: AppPage; label: string; icon: typeof LayoutDashboard }> = [
+  { id: 'overview', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'checkin', label: 'Daily check-in', icon: Heart },
+  { id: 'activity', label: 'Activity tracking', icon: Activity },
+  { id: 'insights', label: 'Behavior patterns', icon: Brain },
+  { id: 'recommendations', label: 'Recommendations', icon: Target },
+  { id: 'history', label: 'History & trends', icon: BarChart3 },
+  { id: 'settings', label: 'Privacy & data', icon: ShieldCheck },
+  { id: 'demo', label: 'Interactive demo', icon: Compass },
+];
+
+const pageCopy: Record<AppPage, { title: string; description: string }> = {
+  overview: {
+    title: 'Your patterns, at a glance',
+    description: 'Understand your digital habits. Recognize stress patterns. Build healthier routines.',
+  },
+  checkin: {
+    title: 'Make space to check in',
+    description: 'A quick, private reflection. Add another check-in whenever it feels useful.',
+  },
+  activity: {
+    title: 'Your digital routine',
+    description: 'Record a daily snapshot by hand. MindTrace does not track your devices.',
+  },
+  insights: {
+    title: 'Understand your patterns',
+    description: 'See how recent activity and self-reported ratings compare with your own earlier routine.',
+  },
+  recommendations: {
+    title: 'Small steps that may help',
+    description: 'Practical, optional suggestions connected to the patterns you have recorded.',
+  },
+  history: {
+    title: 'Your history',
+    description: 'See mood check-ins and activity together, day by day.',
+  },
+  settings: {
+    title: 'Your privacy & data',
+    description: 'Understand what is stored here and stay in control of your preferences.',
+  },
+  demo: {
+    title: 'Explore the interactive demo',
+    description: 'Try a check-in and see the dashboard, patterns, and suggestions respond to your entries.',
+  },
+};
+
+type MoodForm = {
+  recordedAt: string;
+  mood: number;
+  stress: number;
+  energy: number;
+  fatigue: number;
   note: string;
   editingId: string | null;
 };
 
-type ActivityFormState = {
+type ActivityForm = {
   date: string;
   totalScreenTime: string;
-  activeWorkHours: string;
+  workStudyHours: string;
   socialMediaHours: string;
   entertainmentHours: string;
   lateNightUsage: string;
   breaks: string;
   averageBreakMinutes: string;
   tasksCompleted: string;
+  notes: string;
   editingId: string | null;
 };
 
-const defaultMoodForm = (): MoodFormState => ({
-  date: new Date().toISOString().slice(0, 10),
-  mood: '3',
-  stress: '3',
-  energy: '3',
-  fatigue: '3',
-  note: '',
-  editingId: null,
-});
+type ActivityNumericField =
+  | 'totalScreenTime'
+  | 'workStudyHours'
+  | 'socialMediaHours'
+  | 'entertainmentHours'
+  | 'lateNightUsage'
+  | 'breaks'
+  | 'averageBreakMinutes'
+  | 'tasksCompleted';
 
-const defaultActivityForm = (): ActivityFormState => ({
-  date: new Date().toISOString().slice(0, 10),
-  totalScreenTime: '6',
-  activeWorkHours: '3',
-  socialMediaHours: '1.5',
-  entertainmentHours: '1.5',
-  lateNightUsage: '0.8',
-  breaks: '3',
-  averageBreakMinutes: '18',
-  tasksCompleted: '7',
-  editingId: null,
-});
-
-const navItems: Array<{ id: NavPage; label: string; icon: ReactNode }> = [
-  { id: 'overview', label: 'Overview', icon: <LayoutGrid size={17} /> },
-  { id: 'mood', label: 'Mood Check-in', icon: <HeartPulse size={17} /> },
-  { id: 'activity', label: 'Activity Log', icon: <Activity size={17} /> },
-  { id: 'insights', label: 'Insights', icon: <BrainCircuit size={17} /> },
-  { id: 'settings', label: 'Settings & Privacy', icon: <ShieldCheck size={17} /> },
-];
-
-function formatDateValue(date: string): string {
-  return new Intl.DateTimeFormat('en-US', {
-    month: 'short',
-    day: 'numeric',
-    year: 'numeric',
-  }).format(new Date(`${date}T12:00:00`));
+function toLocalDateTimeInput(date = new Date()): string {
+  return new Date(date.getTime() - date.getTimezoneOffset() * 60_000).toISOString().slice(0, 16);
 }
 
-function StatCard({
+function newMoodForm(): MoodForm {
+  return { recordedAt: toLocalDateTimeInput(), mood: 3, stress: 3, energy: 3, fatigue: 3, note: '', editingId: null };
+}
+
+function newActivityForm(): ActivityForm {
+  return {
+    date: localDateKey(),
+    totalScreenTime: '',
+    workStudyHours: '',
+    socialMediaHours: '',
+    entertainmentHours: '',
+    lateNightUsage: '',
+    breaks: '',
+    averageBreakMinutes: '',
+    tasksCompleted: '',
+    notes: '',
+    editingId: null,
+  };
+}
+
+function makeId(prefix: string): string {
+  return `${prefix}-${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`}`;
+}
+
+function isValidDateKey(value: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const parsed = new Date(`${value}T00:00:00.000Z`);
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value;
+}
+
+function optionalNumber(value: string): number | undefined {
+  return value.trim() === '' ? undefined : Number(value);
+}
+
+function dataStatus(data: AppData): { demoOnly: boolean; demoCount: number; userCount: number } {
+  const records = [...data.moodCheckIns, ...data.activityEntries];
+  return {
+    demoOnly: records.length > 0 && records.every((record) => record.source === 'demo'),
+    demoCount: records.filter((record) => record.source === 'demo').length,
+    userCount: records.filter((record) => record.source === 'user').length,
+  };
+}
+
+function PageHeading({ page, children }: { page: AppPage; children?: ReactNode }) {
+  const copy = pageCopy[page];
+  return (
+    <div className="page-heading">
+      <div>
+        <div className="eyebrow">{page === 'overview' ? 'MindTrace / overview' : navItems.find((item) => item.id === page)?.label}</div>
+        <h1>{copy.title}</h1>
+        <p>{copy.description}</p>
+      </div>
+      {children && <div className="heading-actions">{children}</div>}
+    </div>
+  );
+}
+
+function Panel({
+  eyebrow,
+  title,
+  action,
+  children,
+  className = '',
+}: {
+  eyebrow?: string;
+  title?: string;
+  action?: ReactNode;
+  children: ReactNode;
+  className?: string;
+}) {
+  return (
+    <section className={`panel ${className}`}>
+      {(eyebrow || title || action) && (
+        <div className="panel-heading">
+          <div>
+            {eyebrow && <div className="eyebrow">{eyebrow}</div>}
+            {title && <h2>{title}</h2>}
+          </div>
+          {action}
+        </div>
+      )}
+      {children}
+    </section>
+  );
+}
+
+function MetricCard({
   label,
   value,
-  detail,
-  icon,
+  note,
+  icon: Icon,
+  accent = '',
 }: {
   label: string;
   value: string;
-  detail: string;
-  icon: ReactNode;
+  note: string;
+  icon: typeof Activity;
+  accent?: string;
 }) {
   return (
-    <div className="stat-card">
-      <div className="stat-icon">{icon}</div>
-      <div>
-        <p className="stat-label">{label}</p>
-        <h3>{value}</h3>
-        <span>{detail}</span>
+    <article className="metric-card">
+      <div className={`metric-icon ${accent}`}><Icon size={18} strokeWidth={1.8} /></div>
+      <div className="metric-content">
+        <span className="metric-label">{label}</span>
+        <strong>{value}</strong>
+        <span className="metric-note">{note}</span>
       </div>
+    </article>
+  );
+}
+
+function SourceBadge({ source }: { source: 'demo' | 'user' }) {
+  return <span className={`source-badge ${source}`}>{source === 'demo' ? 'Sample' : 'Personal'}</span>;
+}
+
+function EmptyState({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <div className="empty-state">
+      <div className="empty-icon"><CalendarDays size={19} /></div>
+      <strong>{title}</strong>
+      <p>{children}</p>
     </div>
+  );
+}
+
+function RatingScale({
+  label,
+  hint,
+  value,
+  onChange,
+  low,
+  high,
+}: {
+  label: string;
+  hint: string;
+  value: number;
+  onChange: (value: number) => void;
+  low: string;
+  high: string;
+}) {
+  const id = label.toLowerCase().replaceAll(' ', '-');
+  return (
+    <fieldset className="rating-field">
+      <legend>{label}</legend>
+      <p className="field-hint">{hint}</p>
+      <div className="rating-options" role="group" aria-label={`${label} rating`}>
+        {[1, 2, 3, 4, 5].map((rating) => (
+          <button
+            type="button"
+            key={rating}
+            className={rating === value ? 'rating-option selected' : 'rating-option'}
+            aria-label={`${label} ${rating} out of 5`}
+            aria-pressed={rating === value}
+            onClick={() => onChange(rating)}
+          >
+            {rating}
+          </button>
+        ))}
+      </div>
+      <div className="scale-labels"><span>{low}</span><span>{high}</span></div>
+      <span className="visually-hidden" id={`${id}-selected`}>Selected: {value} out of 5</span>
+    </fieldset>
+  );
+}
+
+function InsightCard({ insight }: { insight: BehaviorInsight }) {
+  return (
+    <article className={`insight-card ${insight.status}`}>
+      <div className="insight-card-top">
+        <span className={`status-dot ${insight.status}`} />
+        <span className="insight-status">
+          {insight.status === 'steady' ? 'Within recent range'
+            : insight.status === 'combined' ? 'Changes observed together'
+              : insight.status === 'insufficient' ? 'More history needed'
+                : 'A change to notice'}
+        </span>
+      </div>
+      <h3>{insight.title}</h3>
+      <p>{insight.description}</p>
+      <div className="insight-evidence">{insight.evidence}</div>
+    </article>
   );
 }
 
 function App() {
-  const [activePage, setActivePage] = useState<NavPage>('overview');
+  const [initial] = useState(() => loadAppData());
+  const [data, setData] = useState<AppData>(initial.data);
+  const [activePage, setActivePage] = useState<AppPage>('overview');
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  const [moodEntries, setMoodEntries] = useState<MoodCheckIn[]>(() => loadMoodEntries());
-  const [activityEntries, setActivityEntries] = useState<ActivityEntry[]>(() => loadActivityEntries());
-  const [moodForm, setMoodForm] = useState<MoodFormState>(() => defaultMoodForm());
-  const [activityForm, setActivityForm] = useState<ActivityFormState>(() => defaultActivityForm());
-  const [moodErrors, setMoodErrors] = useState<Partial<Record<keyof MoodFormState, string>>>({});
-  const [activityErrors, setActivityErrors] = useState<Partial<Record<keyof ActivityFormState, string>>>({});
-  const [moodSaving, setMoodSaving] = useState(false);
-  const [activitySaving, setActivitySaving] = useState(false);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [notice, setNotice] = useState(initial.warning);
+  const [moodForm, setMoodForm] = useState<MoodForm>(() => newMoodForm());
+  const [activityForm, setActivityForm] = useState<ActivityForm>(() => newActivityForm());
+  const [moodErrors, setMoodErrors] = useState<Record<string, string>>({});
+  const [activityErrors, setActivityErrors] = useState<Record<string, string>>({});
+  const [range, setRange] = useState<DateRange>('7d');
+  const [historyRange, setHistoryRange] = useState<DateRange>('30d');
+  const [historySearch, setHistorySearch] = useState('');
+  const today = localDateKey();
 
   useEffect(() => {
-    persistEntries(moodEntries, activityEntries);
-  }, [moodEntries, activityEntries]);
+    document.documentElement.dataset.theme = data.preferences.theme;
+    document.querySelector('meta[name="theme-color"]')?.setAttribute(
+      'content',
+      data.preferences.theme === 'dark' ? '#151e22' : '#f5f5f1',
+    );
+  }, [data.preferences.theme]);
 
   useEffect(() => {
-    if (!notice) {
-      return undefined;
-    }
-
-    const timer = window.setTimeout(() => setNotice(null), 3000);
-    return () => window.clearTimeout(timer);
+    if (!notice) return undefined;
+    const timeout = window.setTimeout(() => setNotice(null), 5500);
+    return () => window.clearTimeout(timeout);
   }, [notice]);
 
-  const summary = useMemo(
-    () => calculateSummaryMetrics(activityEntries, moodEntries),
-    [activityEntries, moodEntries],
+  const orderedActivities = useMemo(() => sortActivities(data.activityEntries), [data.activityEntries]);
+  const orderedCheckIns = useMemo(() => sortCheckIns(data.moodCheckIns), [data.moodCheckIns]);
+  const allSummaries = useMemo(
+    () => buildDailySummaries(data.activityEntries, data.moodCheckIns),
+    [data.activityEntries, data.moodCheckIns],
   );
-
-  const screenTimeData = useMemo(() => buildScreenTimeChartData(activityEntries), [activityEntries]);
-  const moodChartData = useMemo(() => buildMoodStressChartData(moodEntries), [moodEntries]);
-  const behaviorData = useMemo(() => buildBehaviorChartData(activityEntries), [activityEntries]);
-  const insightList = useMemo(() => generateInsights(activityEntries, moodEntries), [activityEntries, moodEntries]);
-  const behaviorDrift = useMemo(() => getBehaviorDrift(activityEntries), [activityEntries]);
-
-  const orderedMoodEntries = useMemo(
-    () => sortByDate(moodEntries).reverse(),
-    [moodEntries],
+  const baseline = useMemo(
+    () => analyzeBaseline(data.activityEntries, data.moodCheckIns),
+    [data.activityEntries, data.moodCheckIns],
   );
-  const orderedActivityEntries = useMemo(
-    () => sortByDate(activityEntries).reverse(),
-    [activityEntries],
-  );
+  const analysis = useMemo(() => buildInsights(baseline), [baseline]);
+  const recommendations = useMemo(() => buildRecommendations(analysis.insights), [analysis.insights]);
+  const sourceSummary = useMemo(() => dataStatus(data), [data]);
+  const todaySummary = allSummaries.find((item) => item.date === today);
+  const todayCheckIns = orderedCheckIns.filter((entry) => entry.date === today);
+  const chartSummaries = filterByRange(allSummaries, range);
 
-  const allDates = useMemo(
-    () => [...moodEntries.map((entry) => entry.date), ...activityEntries.map((entry) => entry.date)],
-    [moodEntries, activityEntries],
-  );
-
-  const dateRangeText =
-    allDates.length > 0
-      ? `${formatDateValue(allDates.reduce((min, current) => (current < min ? current : min), allDates[0]))}–${formatDateValue(allDates.reduce((max, current) => (current > max ? current : max), allDates[0]))}`
-      : 'No local data yet';
-
-  const usingDemoData =
-    moodEntries.every((entry) => entry.source === 'demo') &&
-    activityEntries.every((entry) => entry.source === 'demo');
-
-  const moodScale = [1, 2, 3, 4, 5] as const;
-  const activityHints = [
-    'Record your total screen time without using background tracking.',
-    'Breaks should reflect your actual pause count and duration.',
-    'This app does not diagnose stress or anxiety.',
-  ];
-
-  const handleMoodFieldChange = (key: keyof Omit<MoodFormState, 'editingId'>, value: string) => {
-    setMoodForm((previous) => ({ ...previous, [key]: value }));
-    setMoodErrors((previous) => ({ ...previous, [key]: undefined }));
+  const updateData = (updater: (previous: AppData) => AppData) => {
+    const updated = updater(data);
+    setData(updated);
+    try {
+      saveAppData(updated);
+      setNotice('Saved in this browser.');
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : 'Could not save your changes.');
+    }
   };
 
-  const handleActivityFieldChange = (
-    key: keyof Omit<ActivityFormState, 'editingId'>,
-    value: string,
-  ) => {
-    setActivityForm((previous) => ({ ...previous, [key]: value }));
-    setActivityErrors((previous) => ({ ...previous, [key]: undefined }));
+  const navigate = (page: AppPage) => {
+    setActivePage(page);
+    setMobileMenuOpen(false);
+    window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
-  const validateMoodForm = () => {
-    const nextErrors: Partial<Record<keyof MoodFormState, string>> = {};
-
-    if (!moodForm.date) {
-      nextErrors.date = 'Choose a date for this check-in.';
-    }
-
-    const moodValue = Number(moodForm.mood);
-    const stressValue = Number(moodForm.stress);
-    const energyValue = Number(moodForm.energy);
-    const fatigueValue = Number(moodForm.fatigue);
-
-    if (!Number.isFinite(moodValue) || moodValue < 1 || moodValue > 5) {
-      nextErrors.mood = 'Mood must be between 1 and 5.';
-    }
-
-    if (!Number.isFinite(stressValue) || stressValue < 1 || stressValue > 5) {
-      nextErrors.stress = 'Stress must be between 1 and 5.';
-    }
-
-    if (!Number.isFinite(energyValue) || energyValue < 1 || energyValue > 5) {
-      nextErrors.energy = 'Energy must be between 1 and 5.';
-    }
-
-    if (!Number.isFinite(fatigueValue) || fatigueValue < 1 || fatigueValue > 5) {
-      nextErrors.fatigue = 'Fatigue must be between 1 and 5.';
-    }
-
-    setMoodErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
+  const setTheme = (theme: ThemePreference) => {
+    updateData((previous) => ({ ...previous, preferences: { ...previous.preferences, theme } }));
   };
 
-  const validateActivityForm = () => {
-    const nextErrors: Partial<Record<keyof ActivityFormState, string>> = {};
-
-    const totalScreenTime = Number(activityForm.totalScreenTime);
-    const activeWorkHours = Number(activityForm.activeWorkHours);
-    const socialMediaHours = Number(activityForm.socialMediaHours);
-    const entertainmentHours = Number(activityForm.entertainmentHours);
-    const lateNightUsage = Number(activityForm.lateNightUsage);
-    const breaks = Number(activityForm.breaks);
-    const averageBreakMinutes = Number(activityForm.averageBreakMinutes);
-    const tasksCompleted = Number(activityForm.tasksCompleted);
-
-    if (!activityForm.date) {
-      nextErrors.date = 'Choose a valid activity date.';
-    }
-
-    if (!Number.isFinite(totalScreenTime) || totalScreenTime < 0 || totalScreenTime > 24) {
-      nextErrors.totalScreenTime = 'Total screen time must be a value between 0 and 24 hours.';
-    }
-
-    if (!Number.isFinite(activeWorkHours) || activeWorkHours < 0 || activeWorkHours > 24) {
-      nextErrors.activeWorkHours = 'Active work/study hours must be between 0 and 24.';
-    }
-
-    if (!Number.isFinite(socialMediaHours) || socialMediaHours < 0 || socialMediaHours > 24) {
-      nextErrors.socialMediaHours = 'Social media usage must be between 0 and 24 hours.';
-    }
-
-    if (!Number.isFinite(entertainmentHours) || entertainmentHours < 0 || entertainmentHours > 24) {
-      nextErrors.entertainmentHours = 'Entertainment usage must be between 0 and 24 hours.';
-    }
-
-    if (!Number.isFinite(lateNightUsage) || lateNightUsage < 0 || lateNightUsage > 24) {
-      nextErrors.lateNightUsage = 'Late-night usage must be between 0 and 24 hours.';
-    }
-
-    if (!Number.isFinite(breaks) || breaks < 0 || breaks > 15) {
-      nextErrors.breaks = 'Break count must be between 0 and 15.';
-    }
-
-    if (!Number.isFinite(averageBreakMinutes) || averageBreakMinutes < 0 || averageBreakMinutes > 180) {
-      nextErrors.averageBreakMinutes = 'Average break duration must be between 0 and 180 minutes.';
-    }
-
-    if (!Number.isFinite(tasksCompleted) || tasksCompleted < 0 || tasksCompleted > 50) {
-      nextErrors.tasksCompleted = 'Tasks completed must be between 0 and 50.';
-    }
-
-    if (activeWorkHours > totalScreenTime) {
-      nextErrors.activeWorkHours = 'Active work/study hours cannot exceed total screen time.';
-    }
-
-    if (socialMediaHours > totalScreenTime) {
-      nextErrors.socialMediaHours = 'Social media use cannot exceed total screen time.';
-    }
-
-    if (entertainmentHours > totalScreenTime) {
-      nextErrors.entertainmentHours = 'Entertainment use cannot exceed total screen time.';
-    }
-
-    if (lateNightUsage > totalScreenTime) {
-      nextErrors.lateNightUsage = 'Late-night usage cannot exceed total screen time.';
-    }
-
-    setActivityErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  };
-
-  const handleMoodSubmit = (event: FormEvent) => {
+  const saveMood = (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-
-    if (!validateMoodForm()) {
-      return;
+    const errors: Record<string, string> = {};
+    const date = new Date(moodForm.recordedAt);
+    if (!moodForm.recordedAt || !Number.isFinite(date.getTime())) {
+      errors.recordedAt = 'Choose a valid date and time.';
     }
+    if (date.getTime() > Date.now() + 60_000) errors.recordedAt = 'A check-in cannot be in the future.';
+    setMoodErrors(errors);
+    if (Object.keys(errors).length) return;
 
-    setMoodSaving(true);
     const entry: MoodCheckIn = {
-      id: moodForm.editingId ?? `mood-${Date.now()}`,
-      date: moodForm.date,
-      mood: Number(moodForm.mood),
-      stress: Number(moodForm.stress),
-      energy: Number(moodForm.energy),
-      fatigue: Number(moodForm.fatigue),
+      id: moodForm.editingId ?? makeId('checkin'),
+      date: localDateKey(date),
+      recordedAt: date.toISOString(),
+      mood: moodForm.mood,
+      stress: moodForm.stress,
+      energy: moodForm.energy,
+      fatigue: moodForm.fatigue,
       note: moodForm.note.trim(),
       source: 'user',
     };
-
-    setMoodEntries((previous) => {
-      const filtered = moodForm.editingId
-        ? previous.filter((item) => item.id !== moodForm.editingId)
-        : previous;
-      return sortByDate([...filtered, entry]);
-    });
-
-    setMoodForm(defaultMoodForm());
-    setMoodSaving(false);
-    setNotice('Mood check-in saved locally.');
+    updateData((previous) => ({
+      ...previous,
+      moodCheckIns: sortCheckIns([
+        ...previous.moodCheckIns.filter((item) => item.id !== entry.id),
+        entry,
+      ]),
+    }));
+    setMoodForm(newMoodForm());
   };
 
-  const handleActivitySubmit = (event: FormEvent) => {
-    event.preventDefault();
-
-    if (!validateActivityForm()) {
-      return;
+  const saveActivity = (event?: FormEvent<HTMLFormElement>) => {
+    event?.preventDefault();
+    const errors: Record<string, string> = {};
+    const total = Number(activityForm.totalScreenTime);
+    const optionalFields: Array<[keyof ActivityForm, string, number]> = [
+      ['workStudyHours', 'Work / study', 24],
+      ['socialMediaHours', 'Social media', 24],
+      ['entertainmentHours', 'Entertainment', 24],
+      ['lateNightUsage', 'Late-night use', 24],
+      ['breaks', 'Break count', 100],
+      ['averageBreakMinutes', 'Average break duration', 240],
+      ['tasksCompleted', 'Tasks completed', 1000],
+    ];
+    if (!isValidDateKey(activityForm.date)) errors.date = 'Choose a valid date.';
+    if (activityForm.date > today) errors.date = 'Activity dates cannot be in the future.';
+    if (!Number.isFinite(total) || total < 0 || total > 24) {
+      errors.totalScreenTime = 'Enter total screen time from 0 to 24 hours.';
     }
+    for (const [key, label, max] of optionalFields) {
+      const rawValue = activityForm[key];
+      if (typeof rawValue !== 'string' || rawValue.trim() === '') continue;
+      const value = Number(rawValue);
+      if (!Number.isFinite(value) || value < 0 || value > max) {
+        errors[key] = `${label} must be between 0 and ${max}${key === 'averageBreakMinutes' ? ' minutes' : key.includes('Hours') || key === 'lateNightUsage' ? ' hours' : ''}.`;
+      } else if (
+        ['workStudyHours', 'socialMediaHours', 'entertainmentHours', 'lateNightUsage'].includes(key)
+        && value > total
+      ) {
+        errors[key] = `${label} cannot exceed total screen time.`;
+      } else if (key === 'breaks' && !Number.isInteger(value)) {
+        errors[key] = 'Break count must be a whole number.';
+      } else if (key === 'tasksCompleted' && !Number.isInteger(value)) {
+        errors[key] = 'Tasks completed must be a whole number.';
+      }
+    }
+    setActivityErrors(errors);
+    if (Object.keys(errors).length) return;
 
-    setActivitySaving(true);
-    const entry: ActivityEntry = {
-      id: activityForm.editingId ?? `activity-${Date.now()}`,
+    const entry: DailyActivity = {
+      id: activityForm.editingId
+        ?? data.activityEntries.find((item) => item.date === activityForm.date)?.id
+        ?? makeId('activity'),
       date: activityForm.date,
-      totalScreenTime: Number(activityForm.totalScreenTime),
-      activeWorkHours: Number(activityForm.activeWorkHours),
-      socialMediaHours: Number(activityForm.socialMediaHours),
-      entertainmentHours: Number(activityForm.entertainmentHours),
-      lateNightUsage: Number(activityForm.lateNightUsage),
-      breaks: Number(activityForm.breaks),
-      averageBreakMinutes: Number(activityForm.averageBreakMinutes),
-      tasksCompleted: Number(activityForm.tasksCompleted),
+      totalScreenTime: total,
+      workStudyHours: optionalNumber(activityForm.workStudyHours),
+      socialMediaHours: optionalNumber(activityForm.socialMediaHours),
+      entertainmentHours: optionalNumber(activityForm.entertainmentHours),
+      lateNightUsage: optionalNumber(activityForm.lateNightUsage),
+      breaks: optionalNumber(activityForm.breaks),
+      averageBreakMinutes: optionalNumber(activityForm.averageBreakMinutes),
+      tasksCompleted: optionalNumber(activityForm.tasksCompleted),
+      notes: activityForm.notes.trim() || undefined,
       source: 'user',
     };
-
-    setActivityEntries((previous) => {
-      const filtered = activityForm.editingId
-        ? previous.filter((item) => item.id !== activityForm.editingId)
-        : previous;
-      return sortByDate([...filtered, entry]);
-    });
-
-    setActivityForm(defaultActivityForm());
-    setActivitySaving(false);
-    setNotice('Activity entry saved locally.');
+    updateData((previous) => ({
+      ...previous,
+      activityEntries: sortActivities([
+        ...previous.activityEntries.filter((item) => item.id !== entry.id && item.date !== entry.date),
+        entry,
+      ]),
+    }));
+    setActivityForm(newActivityForm());
   };
 
-  const handleResetToDemo = () => {
-    const { moodEntries: demoMoodEntries, activityEntries: demoActivityEntries } = restoreDemoEntries();
-    setMoodEntries(demoMoodEntries);
-    setActivityEntries(demoActivityEntries);
-    setNotice('Original demo data restored.');
-  };
-
-  const resetWithConfirmation = () => {
-    const confirmed = window.confirm(
-      'Reset all local MindTrace data back to the original demo dataset?',
-    );
-
-    if (confirmed) {
-      handleResetToDemo();
-    }
-  };
-
-  const loadMoodForEdit = (entry: MoodCheckIn) => {
-    setActivePage('mood');
+  const editMood = (entry: MoodCheckIn) => {
     setMoodForm({
-      date: entry.date,
-      mood: String(entry.mood),
-      stress: String(entry.stress),
-      energy: String(entry.energy),
-      fatigue: String(entry.fatigue),
+      recordedAt: toLocalDateTimeInput(new Date(entry.recordedAt)),
+      mood: entry.mood,
+      stress: entry.stress,
+      energy: entry.energy,
+      fatigue: entry.fatigue,
       note: entry.note,
       editingId: entry.id,
     });
+    setMoodErrors({});
+    navigate('checkin');
   };
 
-  const loadActivityForEdit = (entry: ActivityEntry) => {
-    setActivePage('activity');
+  const editActivity = (entry: DailyActivity) => {
     setActivityForm({
       date: entry.date,
       totalScreenTime: String(entry.totalScreenTime),
-      activeWorkHours: String(entry.activeWorkHours),
-      socialMediaHours: String(entry.socialMediaHours),
-      entertainmentHours: String(entry.entertainmentHours),
-      lateNightUsage: String(entry.lateNightUsage),
-      breaks: String(entry.breaks),
-      averageBreakMinutes: String(entry.averageBreakMinutes),
-      tasksCompleted: String(entry.tasksCompleted),
+      workStudyHours: entry.workStudyHours === undefined ? '' : String(entry.workStudyHours),
+      socialMediaHours: entry.socialMediaHours === undefined ? '' : String(entry.socialMediaHours),
+      entertainmentHours: entry.entertainmentHours === undefined ? '' : String(entry.entertainmentHours),
+      lateNightUsage: entry.lateNightUsage === undefined ? '' : String(entry.lateNightUsage),
+      breaks: entry.breaks === undefined ? '' : String(entry.breaks),
+      averageBreakMinutes: entry.averageBreakMinutes === undefined ? '' : String(entry.averageBreakMinutes),
+      tasksCompleted: entry.tasksCompleted === undefined ? '' : String(entry.tasksCompleted),
+      notes: entry.notes ?? '',
       editingId: entry.id,
     });
+    setActivityErrors({});
+    navigate('activity');
   };
 
-  const renderRatingControl = (
-    key: 'mood' | 'stress' | 'energy' | 'fatigue',
-    label: string,
-    helperText: string,
-  ) => (
-    <div className="field rating-field">
-      <label>{label}</label>
-      <p className="helper-copy">{helperText}</p>
-      <div className="segmented-control">
-        {moodScale.map((value) => (
-          <button
-            key={`${key}-${value}`}
-            type="button"
-            className={`segmented-button ${String(moodForm[key]) === String(value) ? 'selected' : ''}`}
-            onClick={() => handleMoodFieldChange(key, String(value))}
-          >
-            {value}
-          </button>
-        ))}
-      </div>
-      {moodErrors[key] && <span className="field-error">{moodErrors[key]}</span>}
-    </div>
-  );
+  const deleteMood = (entry: MoodCheckIn) => {
+    if (!window.confirm(`Delete the ${formatDateTime(entry.recordedAt)} check-in? This cannot be undone.`)) return;
+    updateData((previous) => ({
+      ...previous,
+      moodCheckIns: previous.moodCheckIns.filter((item) => item.id !== entry.id),
+    }));
+  };
 
-  const renderOverviewPage = () => (
-    <>
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Overview</p>
-          <h1>Wellness snapshot</h1>
-          <p className="subtitle">
-            Compare recent digital behavior against your personal routine and look for gentle shifts worth paying attention to.
-          </p>
-        </div>
-        <div className={`status-pill ${usingDemoData ? 'demo' : 'live'}`}>
-          {usingDemoData ? 'Demo data' : 'Local prototype data'}
-        </div>
-      </div>
+  const deleteActivity = (entry: DailyActivity) => {
+    if (!window.confirm(`Delete the activity entry for ${formatDate(entry.date)}? This cannot be undone.`)) return;
+    updateData((previous) => ({
+      ...previous,
+      activityEntries: previous.activityEntries.filter((item) => item.id !== entry.id),
+    }));
+    if (activityForm.editingId === entry.id) setActivityForm(newActivityForm());
+  };
 
-      <div className="date-strip">
-        <CalendarDays size={16} />
-        <span>{dateRangeText}</span>
-      </div>
+  const resetToDemo = () => {
+    if (!window.confirm('Restore the sample dataset? This replaces the records currently saved in this browser.')) return;
+    updateData((previous) => ({
+      ...restoreDemoData(),
+      preferences: previous.preferences,
+    }));
+    setMoodForm(newMoodForm());
+    setActivityForm(newActivityForm());
+    setNotice('Sample records restored in this browser.');
+  };
 
-      {notice && <div className="status-banner">{notice}</div>}
+  const clearPersonalData = () => {
+    if (!window.confirm('Remove all personal records saved in this browser? Sample records will remain. This cannot be undone.')) return;
+    updateData((previous) => ({
+      ...previous,
+      moodCheckIns: previous.moodCheckIns.filter((item) => item.source === 'demo'),
+      activityEntries: previous.activityEntries.filter((item) => item.source === 'demo'),
+    }));
+    setNotice('Personal records cleared. Sample records were kept.');
+  };
 
-      <div className="metric-grid">
-        <StatCard
-          label="Average screen time"
-          value={`${summary.avgScreenTime.toFixed(1)}h`}
-          detail="per day"
-          icon={<Clock3 size={18} />}
-        />
-        <StatCard
-          label="Average mood"
-          value={`${summary.avgMood.toFixed(1)}/5`}
-          detail="self-reported"
-          icon={<Sparkles size={18} />}
-        />
-        <StatCard
-          label="Average breaks"
-          value={`${summary.avgBreakCount.toFixed(1)}`}
-          detail="per day"
-          icon={<MoonStar size={18} />}
-        />
-        <StatCard
-          label="Late-night usage"
-          value={`${summary.recentLateNight.toFixed(1)}h`}
-          detail="recent average"
-          icon={<TrendingUp size={18} />}
-        />
-      </div>
-
-      <div className="chart-grid">
-        <div className="chart-card large">
-          <div className="chart-header">
-            <div>
-              <p className="eyebrow small">Daily screen time</p>
-              <h2>Screen-time trend</h2>
-            </div>
-          </div>
-          {screenTimeData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <LineChart data={screenTimeData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#d7d7d0" />
-                <XAxis dataKey="date" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} unit="h" />
-                <Tooltip
-                  formatter={(value, name) => {
-                    const numericValue = Array.isArray(value) ? Number(value[0]) : Number(value ?? 0);
-                    void name;
-                    return [`${numericValue.toFixed(1)}h`, 'Screen time'];
-                  }}
-                />
-                <Line type="monotone" dataKey="screenTime" stroke="#0b6a7d" strokeWidth={3} dot={{ r: 4 }} />
-              </LineChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="empty-state">Add activity entries to populate the trend chart.</div>
-          )}
-        </div>
-
-        <div className="chart-card large">
-          <div className="chart-header">
-            <div>
-              <p className="eyebrow small">User-reported ratings</p>
-              <h2>Mood vs. stress</h2>
-            </div>
-          </div>
-          {moodChartData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={260}>
-              <ComposedChart data={moodChartData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#d7d7d0" />
-                <XAxis dataKey="date" tickLine={false} axisLine={false} />
-                <YAxis domain={[1, 5]} tickLine={false} axisLine={false} />
-                <Tooltip
-                  formatter={(value, name) => {
-                    const numericValue = Array.isArray(value) ? Number(value[0]) : Number(value ?? 0);
-                    const label = name === 'mood' ? 'Mood' : 'Stress';
-                    return [`${numericValue.toFixed(1)}/5`, label];
-                  }}
-                />
-                <Legend />
-                <Line type="monotone" dataKey="mood" stroke="#0d8a7b" strokeWidth={3} name="Mood" dot={{ r: 4 }} />
-                <Line type="monotone" dataKey="stress" stroke="#c56b4d" strokeWidth={3} name="Stress" dot={{ r: 4 }} />
-              </ComposedChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="empty-state">Add a mood check-in to see the relationship over time.</div>
-          )}
-        </div>
-
-        <div className="chart-card">
-          <div className="chart-header">
-            <div>
-              <p className="eyebrow small">Behavior pattern</p>
-              <h2>Late-night usage</h2>
-            </div>
-          </div>
-          {behaviorData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={behaviorData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#d7d7d0" />
-                <XAxis dataKey="date" tickLine={false} axisLine={false} />
-                <YAxis tickLine={false} axisLine={false} unit="h" />
-                <Tooltip
-                  formatter={(value, name) => {
-                    const numericValue = Array.isArray(value) ? Number(value[0]) : Number(value ?? 0);
-                    void name;
-                    return [`${numericValue.toFixed(1)}h`, 'Late-night usage'];
-                  }}
-                />
-                <Bar dataKey="lateNight" fill="#2e7d7b" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="empty-state">No activity history yet.</div>
-          )}
-        </div>
-
-        <div className="chart-card">
-          <div className="chart-header">
-            <div>
-              <p className="eyebrow small">Break rhythm</p>
-              <h2>Break count</h2>
-            </div>
-          </div>
-          {behaviorData.length > 0 ? (
-            <ResponsiveContainer width="100%" height={240}>
-              <BarChart data={behaviorData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#d7d7d0" />
-                <XAxis dataKey="date" tickLine={false} axisLine={false} />
-                <YAxis allowDecimals={false} tickLine={false} axisLine={false} />
-                <Tooltip
-                  formatter={(value, name) => {
-                    const numericValue = Array.isArray(value) ? Number(value[0]) : Number(value ?? 0);
-                    void name;
-                    return [`${numericValue.toFixed(0)} breaks`, 'Breaks'];
-                  }}
-                />
-                <Bar dataKey="breaks" fill="#d49a6a" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          ) : (
-            <div className="empty-state">Break count data will appear after logging activities.</div>
-          )}
-        </div>
-      </div>
-
-      <div className="cta-section">
-        <div className="context-panel">
-          <div>
-            <p className="eyebrow small">Recent activity</p>
-            <h2>What changed lately?</h2>
-          </div>
-          <div className="mini-list">
-            {getRecentActivityHighlights(activityEntries).length > 0 ? (
-              getRecentActivityHighlights(activityEntries).map((item) => (
-                <button key={item.date} type="button" className="mini-item" onClick={() => setActivePage('activity')}>
-                  <span>{item.date}</span>
-                  <strong>{item.summary}</strong>
-                  <ChevronRight size={15} />
-                </button>
-              ))
-            ) : (
-              <div className="empty-state compact">Log an activity entry to start building this view.</div>
-            )}
-          </div>
-        </div>
-
-        <div className="action-panel">
-          <p className="eyebrow small">Primary actions</p>
-          <h2>Start with a gentle check-in</h2>
-          <div className="action-stack">
-            <button type="button" className="primary-button" onClick={() => setActivePage('mood')}>
-              Record today&apos;s mood
-            </button>
-            <button type="button" className="secondary-button" onClick={() => setActivePage('activity')}>
-              Add an activity entry
-            </button>
-            <button type="button" className="secondary-button" onClick={() => setActivePage('insights')}>
-              View insights
-            </button>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-
-  const renderMoodPage = () => (
-    <>
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Mood Check-in</p>
-          <h1>Daily check-in</h1>
-          <p className="subtitle">
-            Your mood, stress, energy, and fatigue ratings are user-reported signals, not medical measurements.
-          </p>
-        </div>
-      </div>
-
-      <div className="two-column-layout">
-        <form className="panel form-panel" onSubmit={handleMoodSubmit}>
-          <div className="field full-width">
-            <label htmlFor="mood-date">Date</label>
-            <input
-              id="mood-date"
-              type="date"
-              value={moodForm.date}
-              onChange={(event) => handleMoodFieldChange('date', event.target.value)}
-            />
-            {moodErrors.date && <span className="field-error">{moodErrors.date}</span>}
-          </div>
-
-          <div className="rating-grid">
-            {renderRatingControl('mood', 'Mood', '1 = very low, 5 = very high.')}
-            {renderRatingControl('stress', 'Stress', '1 = very calm, 5 = very high stress.')}
-            {renderRatingControl('energy', 'Energy', '1 = very low, 5 = very high energy.')}
-            {renderRatingControl('fatigue', 'Fatigue', '1 = well-rested, 5 = very fatigued.')}
-          </div>
-
-          <div className="field full-width">
-            <label htmlFor="mood-note">Optional note</label>
-            <textarea
-              id="mood-note"
-              rows={4}
-              placeholder="What stood out today?"
-              value={moodForm.note}
-              onChange={(event) => handleMoodFieldChange('note', event.target.value)}
-            />
-          </div>
-
-          <div className="form-actions">
-            <button type="submit" className="primary-button" disabled={moodSaving}>
-              {moodSaving ? 'Saving…' : moodForm.editingId ? 'Update check-in' : 'Save check-in'}
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => setMoodForm(defaultMoodForm())}
-            >
-              Clear form
-            </button>
-          </div>
-        </form>
-
-        <aside className="panel history-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow small">History</p>
-              <h2>Previous check-ins</h2>
-            </div>
-          </div>
-
-          {orderedMoodEntries.length === 0 ? (
-            <div className="empty-state compact">No mood entries yet. Add your first check-in.</div>
-          ) : (
-            <div className="history-stack">
-              {orderedMoodEntries.map((entry) => (
-                <div key={entry.id} className="history-item">
-                  <div>
-                    <strong>{formatDateValue(entry.date)}</strong>
-                    <p>
-                      Mood {entry.mood}/5 · Stress {entry.stress}/5
-                    </p>
-                    {entry.note ? <small>{entry.note}</small> : null}
-                  </div>
-                  <button type="button" className="link-button" onClick={() => loadMoodForEdit(entry)}>
-                    Edit
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </aside>
-      </div>
-    </>
-  );
-
-  const renderActivityPage = () => (
-    <>
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Digital Activity Log</p>
-          <h1>Daily activity</h1>
-          <p className="subtitle">
-            Use your own estimates for the day. These values are kept local to this browser and are not automatically monitored.
-          </p>
-        </div>
-      </div>
-
-      <div className="two-column-layout">
-        <form className="panel form-panel" onSubmit={handleActivitySubmit}>
-          <div className="field full-width">
-            <label htmlFor="activity-date">Date</label>
-            <input
-              id="activity-date"
-              type="date"
-              value={activityForm.date}
-              onChange={(event) => handleActivityFieldChange('date', event.target.value)}
-            />
-            {activityErrors.date && <span className="field-error">{activityErrors.date}</span>}
-          </div>
-
-          <div className="form-grid">
-            <div className="field">
-              <label htmlFor="total-screen-time">Total screen time (hours)</label>
-              <input
-                id="total-screen-time"
-                type="number"
-                min="0"
-                max="24"
-                step="0.1"
-                value={activityForm.totalScreenTime}
-                onChange={(event) => handleActivityFieldChange('totalScreenTime', event.target.value)}
-              />
-              {activityErrors.totalScreenTime && <span className="field-error">{activityErrors.totalScreenTime}</span>}
-            </div>
-
-            <div className="field">
-              <label htmlFor="active-work-hours">Active work/study (hours)</label>
-              <input
-                id="active-work-hours"
-                type="number"
-                min="0"
-                max="24"
-                step="0.1"
-                value={activityForm.activeWorkHours}
-                onChange={(event) => handleActivityFieldChange('activeWorkHours', event.target.value)}
-              />
-              {activityErrors.activeWorkHours && <span className="field-error">{activityErrors.activeWorkHours}</span>}
-            </div>
-
-            <div className="field">
-              <label htmlFor="social-media-hours">Social media (hours)</label>
-              <input
-                id="social-media-hours"
-                type="number"
-                min="0"
-                max="24"
-                step="0.1"
-                value={activityForm.socialMediaHours}
-                onChange={(event) => handleActivityFieldChange('socialMediaHours', event.target.value)}
-              />
-              {activityErrors.socialMediaHours && <span className="field-error">{activityErrors.socialMediaHours}</span>}
-            </div>
-
-            <div className="field">
-              <label htmlFor="entertainment-hours">Entertainment (hours)</label>
-              <input
-                id="entertainment-hours"
-                type="number"
-                min="0"
-                max="24"
-                step="0.1"
-                value={activityForm.entertainmentHours}
-                onChange={(event) => handleActivityFieldChange('entertainmentHours', event.target.value)}
-              />
-              {activityErrors.entertainmentHours && <span className="field-error">{activityErrors.entertainmentHours}</span>}
-            </div>
-
-            <div className="field">
-              <label htmlFor="late-night-hours">Late-night usage (hours)</label>
-              <input
-                id="late-night-hours"
-                type="number"
-                min="0"
-                max="24"
-                step="0.1"
-                value={activityForm.lateNightUsage}
-                onChange={(event) => handleActivityFieldChange('lateNightUsage', event.target.value)}
-              />
-              {activityErrors.lateNightUsage && <span className="field-error">{activityErrors.lateNightUsage}</span>}
-            </div>
-
-            <div className="field">
-              <label htmlFor="activity-breaks">Number of breaks</label>
-              <input
-                id="activity-breaks"
-                type="number"
-                min="0"
-                max="15"
-                step="1"
-                value={activityForm.breaks}
-                onChange={(event) => handleActivityFieldChange('breaks', event.target.value)}
-              />
-              {activityErrors.breaks && <span className="field-error">{activityErrors.breaks}</span>}
-            </div>
-
-            <div className="field">
-              <label htmlFor="break-duration">Average break duration (minutes)</label>
-              <input
-                id="break-duration"
-                type="number"
-                min="0"
-                max="180"
-                step="1"
-                value={activityForm.averageBreakMinutes}
-                onChange={(event) => handleActivityFieldChange('averageBreakMinutes', event.target.value)}
-              />
-              {activityErrors.averageBreakMinutes && <span className="field-error">{activityErrors.averageBreakMinutes}</span>}
-            </div>
-
-            <div className="field">
-              <label htmlFor="tasks-completed">Tasks completed</label>
-              <input
-                id="tasks-completed"
-                type="number"
-                min="0"
-                max="50"
-                step="1"
-                value={activityForm.tasksCompleted}
-                onChange={(event) => handleActivityFieldChange('tasksCompleted', event.target.value)}
-              />
-              {activityErrors.tasksCompleted && <span className="field-error">{activityErrors.tasksCompleted}</span>}
-            </div>
-          </div>
-
-          <div className="hint-list">
-            {activityHints.map((hint) => (
-              <div className="hint-item" key={hint}>
-                <CheckCircle2 size={16} />
-                <span>{hint}</span>
-              </div>
-            ))}
-          </div>
-
-          <div className="form-actions">
-            <button type="submit" className="primary-button" disabled={activitySaving}>
-              {activitySaving ? 'Saving…' : activityForm.editingId ? 'Update entry' : 'Save activity'}
-            </button>
-            <button
-              type="button"
-              className="secondary-button"
-              onClick={() => setActivityForm(defaultActivityForm())}
-            >
-              Clear form
-            </button>
-          </div>
-        </form>
-
-        <aside className="panel history-panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow small">Activity history</p>
-              <h2>Recent entries</h2>
-            </div>
-          </div>
-
-          {orderedActivityEntries.length === 0 ? (
-            <div className="empty-state compact">No activity entries yet.</div>
-          ) : (
-            <div className="history-stack">
-              {orderedActivityEntries.map((entry) => (
-                <div key={entry.id} className="history-item">
-                  <div>
-                    <strong>{formatDateValue(entry.date)}</strong>
-                    <p>
-                      {entry.totalScreenTime.toFixed(1)}h total · {entry.breaks} breaks · {entry.tasksCompleted} tasks
-                    </p>
-                  </div>
-                  <button type="button" className="link-button" onClick={() => loadActivityForEdit(entry)}>
-                    Edit
-                  </button>
-                </div>
-              ))}
-            </div>
-          )}
-        </aside>
-      </div>
-    </>
-  );
-
-  const renderInsightsPage = () => (
-    <>
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Insights</p>
-          <h1>Behavior analysis</h1>
-          <p className="subtitle">
-            These observations compare recent patterns with your own historical routine, using transparent rules instead of a medical diagnosis.
-          </p>
-        </div>
-      </div>
-
-      <div className="insight-top-row">
-        <div className="panel behavior-card">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow small">Behavior drift</p>
-              <h2>0–100 activity deviation</h2>
-            </div>
-          </div>
-          <div className="drift-meter">
-            <div className="drift-score">{behaviorDrift.value ?? '—'}</div>
-            <div>
-              <strong>{behaviorDrift.label}</strong>
-              <p>{behaviorDrift.explanation}</p>
-            </div>
-          </div>
-        </div>
-
-        <div className="panel insight-summary">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow small">Summary</p>
-              <h2>What matters most</h2>
-            </div>
-          </div>
-          <ul className="bullet-list">
-            <li>Recent screen-time average: {summary.avgScreenTime.toFixed(1)}h/day</li>
-            <li>Average mood: {summary.avgMood.toFixed(1)}/5</li>
-            <li>Recent late-night average: {summary.recentLateNight.toFixed(1)}h/day</li>
-          </ul>
-        </div>
-      </div>
-
-      <div className="panel">
-        <div className="panel-header">
-          <div>
-            <p className="eyebrow small">Recent observations</p>
-            <h2>Patterns and recommendations</h2>
-          </div>
-        </div>
-
-        <div className="insight-list">
-          {insightList.map((insight) => (
-            <article key={insight.id} className="insight-item panel-soft">
-              <div className="insight-title-row">
-                <div className={`priority-badge ${insight.priority}`}>{insight.priority}</div>
-                <h3>{insight.title}</h3>
-              </div>
-              <p>{insight.description}</p>
-              <div className="recommendation-box">
-                <Target size={16} />
-                <span>{insight.recommendation}</span>
-              </div>
-            </article>
-          ))}
-        </div>
-      </div>
-    </>
-  );
-
-  const renderSettingsPage = () => (
-    <>
-      <div className="page-header">
-        <div>
-          <p className="eyebrow">Settings &amp; Privacy</p>
-          <h1>Prototype privacy</h1>
-          <p className="subtitle">
-            MindTrace Version 1 keeps data local to this browser. It does not sync to a backend or claim to be a medical assessment.
-          </p>
-        </div>
-      </div>
-
-      <div className="settings-grid">
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow small">How data is stored</p>
-              <h2>Local browser storage</h2>
-            </div>
-          </div>
-          <ul className="bullet-list">
-            <li>Entries are stored in the browser using localStorage.</li>
-            <li>This Version 1 is a prototype and does not send wellness data to a backend.</li>
-            <li>It uses deterministic rules for comparisons and recommendations instead of an integrated external AI model.</li>
-            <li>These ratings are not a diagnosis of stress, anxiety, burnout, or a medical condition.</li>
-          </ul>
-        </div>
-
-        <div className="panel">
-          <div className="panel-header">
-            <div>
-              <p className="eyebrow small">Reset controls</p>
-              <h2>Demo data</h2>
-            </div>
-          </div>
-          <div className="action-stack vertical">
-            <button type="button" className="primary-button" onClick={handleResetToDemo}>
-              Restore original demo data
-            </button>
-            <button type="button" className="secondary-button" onClick={resetWithConfirmation}>
-              Reset local data
-            </button>
-          </div>
-        </div>
-      </div>
-    </>
-  );
-
-  const renderPageContent = () => {
-    switch (activePage) {
-      case 'mood':
-        return renderMoodPage();
-      case 'activity':
-        return renderActivityPage();
-      case 'insights':
-        return renderInsightsPage();
-      case 'settings':
-        return renderSettingsPage();
-      default:
-        return renderOverviewPage();
+  const exportData = () => {
+    try {
+      const payload = JSON.stringify({ format: 'mindtrace-local-export-v1', exportedAt: new Date().toISOString(), data }, null, 2);
+      const url = URL.createObjectURL(new Blob([payload], { type: 'application/json' }));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = `mindtrace-export-${today}.json`;
+      link.click();
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+      setNotice('A JSON export was downloaded to your device.');
+    } catch (error) {
+      setNotice(error instanceof Error ? `Export failed: ${error.message}` : 'Export failed.');
     }
   };
 
-  return (
-    <div className="app-shell">
-      <aside className={`sidebar ${mobileMenuOpen ? 'mobile-open' : ''}`}>
-        <div className="brand-row">
-          <div className="brand-mark">
-            <Sparkles size={18} />
+  const goToAction = (page: AppPage) => () => navigate(page);
+
+  const renderOverview = () => {
+    const latestTodayMood = todayCheckIns.at(-1);
+    const chartData = chartSummaries.map((summary) => ({
+      date: formatDate(summary.date),
+      screenTime: summary.activity?.totalScreenTime ?? null,
+      lateNight: summary.activity?.lateNightUsage ?? null,
+      breaks: summary.activity?.breaks ?? null,
+      tasks: summary.activity?.tasksCompleted ?? null,
+      mood: summary.averageMood === null ? null : Number(summary.averageMood.toFixed(2)),
+      stress: summary.averageStress === null ? null : Number(summary.averageStress.toFixed(2)),
+      fatigue: summary.averageFatigue === null ? null : Number(summary.averageFatigue.toFixed(2)),
+    }));
+    const recentCheckIns = [...todayCheckIns].reverse();
+    const priorityInsight = analysis.insights[0];
+    return (
+      <>
+        <PageHeading page="overview">
+          <button className="button button-quiet" onClick={goToAction('checkin')}><Plus size={16} /> Check in</button>
+          <button className="button button-primary" onClick={goToAction('activity')}><Plus size={16} /> Log activity</button>
+        </PageHeading>
+
+        {sourceSummary.demoOnly && (
+          <div className="demo-banner"><span className="demo-pip" /> Sample data is shown. Add your own entries to make these patterns personal.
+            <button onClick={goToAction('demo')}>Try the interactive demo <ChevronRight size={14} /></button>
+            <button onClick={goToAction('settings')}>Data controls <ChevronRight size={14} /></button>
           </div>
-          <div>
-            <strong>MindTrace AI</strong>
-            <small>Behavior tracker</small>
+        )}
+
+        <div className="snapshot-heading">
+          <div><span className="eyebrow">Today · {formatDate(today, { weekday: 'long', month: 'long', day: 'numeric' })}</span>
+            <h2>A snapshot, not a score</h2></div>
+          <div className="range-switcher" role="group" aria-label="Chart date range">
+            {(['7d', '30d', 'all'] as const).map((item) => (
+              <button key={item} className={range === item ? 'range-button selected' : 'range-button'} onClick={() => setRange(item)}>
+                {item === 'all' ? 'All time' : item === '7d' ? '7 days' : '30 days'}
+              </button>
+            ))}
           </div>
         </div>
 
-        <nav className="nav-list" aria-label="Navigation">
-          {navItems.map((item) => (
-            <button
-              key={item.id}
-              type="button"
-              className={`nav-button ${activePage === item.id ? 'active' : ''}`}
-              onClick={() => {
-                setActivePage(item.id);
-                setMobileMenuOpen(false);
-              }}
-            >
-              <span className="nav-icon">{item.icon}</span>
-              {item.label}
+        <div className="metric-grid">
+          <MetricCard label="Self-reported stress" value={latestTodayMood ? `${latestTodayMood.stress} / 5` : '—'}
+            note={latestTodayMood ? 'Higher means more stress' : 'Only shown when reported'} icon={Brain} accent="amber" />
+          <MetricCard label="Self-reported fatigue" value={latestTodayMood ? `${latestTodayMood.fatigue} / 5` : '—'}
+            note={latestTodayMood ? 'Higher means more fatigue' : 'Only shown when reported'} icon={Heart} accent="rose" />
+          <MetricCard label="Screen time" value={todaySummary?.activity ? `${todaySummary.activity.totalScreenTime.toFixed(1)}h` : '—'}
+            note={todaySummary?.activity ? 'Manual daily entry' : 'No activity recorded today'} icon={Activity} accent="teal" />
+          <MetricCard label="Active work / study" value={todaySummary?.activity?.workStudyHours === undefined ? '—' : `${todaySummary.activity.workStudyHours.toFixed(1)}h`}
+            note={todaySummary?.activity?.workStudyHours === undefined ? 'No active hours recorded' : 'Manually recorded hours'} icon={Clock3} accent="blue" />
+          <MetricCard label="Tasks completed" value={todaySummary?.activity?.tasksCompleted === undefined ? '—' : String(todaySummary.activity.tasksCompleted)}
+            note={todaySummary?.activity?.tasksCompleted === undefined ? 'No task count recorded' : 'Self-reported daily total'} icon={Target} accent="blue" />
+          <MetricCard label="Breaks taken" value={todaySummary?.activity?.breaks === undefined ? '—' : String(todaySummary.activity.breaks)}
+            note={todaySummary?.activity?.breaks === undefined ? 'No break count recorded' : 'Self-reported daily total'} icon={Check} accent="teal" />
+        </div>
+
+        <div className="dashboard-grid chart-grid">
+          <Panel className="chart-panel chart-wide" eyebrow="Digital activity" title="Screen time over time"
+            action={<span className="chart-unit">Hours per day</span>}>
+            {chartData.some((item) => item.screenTime !== null) ? (
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 8, right: 10, bottom: 2, left: -16 }}>
+                    <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
+                    <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} minTickGap={22} />
+                    <YAxis tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} unit="h" />
+                    <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text)' }}
+                      formatter={(value) => [value === null ? 'Not recorded' : `${Number(value).toFixed(1)}h`, 'Screen time']} />
+                    <Line type="monotone" dataKey="screenTime" name="Screen time" stroke="var(--teal)" strokeWidth={2.5} dot={{ r: 3, fill: 'var(--surface)', strokeWidth: 2 }} connectNulls={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <EmptyState title="No activity entries in this range">Record activity manually to see your trend.</EmptyState>}
+          </Panel>
+
+          <Panel className="chart-panel" eyebrow="Self-reported" title="Mood, stress & fatigue"
+            action={<span className="chart-unit">Scale of 1–5</span>}>
+            {chartData.some((item) => item.mood !== null || item.stress !== null || item.fatigue !== null) ? (
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 2, left: -20 }}>
+                    <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
+                    <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} minTickGap={18} />
+                    <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                    <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text)' }}
+                      formatter={(value, name) => [value === null ? 'Not recorded' : `${Number(value).toFixed(1)} / 5`, name]} />
+                    <Legend wrapperStyle={{ color: 'var(--text-muted)', fontSize: 12 }} />
+                    <Line type="monotone" dataKey="mood" name="Mood" stroke="var(--teal)" strokeWidth={2.2} dot={false} connectNulls={false} />
+                    <Line type="monotone" dataKey="stress" name="Stress" stroke="var(--coral)" strokeWidth={2.2} dot={false} connectNulls={false} />
+                    <Line type="monotone" dataKey="fatigue" name="Fatigue" stroke="var(--amber)" strokeWidth={2.2} dot={false} connectNulls={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <EmptyState title="No check-ins in this range">Mood and stress are shown only when you record them.</EmptyState>}
+          </Panel>
+
+          <Panel className="chart-panel" eyebrow="Rest rhythm" title="Breaks recorded"
+            action={<span className="chart-unit">Count per day</span>}>
+            {chartData.some((item) => item.breaks !== null) ? (
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 2, left: -18 }}>
+                    <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
+                    <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} minTickGap={18} />
+                    <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                    <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text)' }}
+                      formatter={(value) => [value === null ? 'Not recorded' : `${value} breaks`, 'Breaks']} />
+                    <Line type="monotone" dataKey="breaks" name="Breaks" stroke="var(--blue)" strokeWidth={2.2} dot={false} connectNulls={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <EmptyState title="No break data in this range">Breaks appear when you choose to record them.</EmptyState>}
+          </Panel>
+
+          <Panel className="chart-panel" eyebrow="Digital routine" title="Late-night use"
+            action={<span className="chart-unit">Hours per day</span>}>
+            {chartData.some((item) => item.lateNight !== null) ? (
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 2, left: -18 }}>
+                    <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
+                    <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} minTickGap={18} />
+                    <YAxis tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} unit="h" />
+                    <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text)' }}
+                      formatter={(value) => [value === null ? 'Not recorded' : `${Number(value).toFixed(1)}h`, 'Late-night use']} />
+                    <Line type="monotone" dataKey="lateNight" name="Late-night use" stroke="var(--amber)" strokeWidth={2.2} dot={false} connectNulls={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <EmptyState title="No late-night data in this range">This optional field appears after you record it.</EmptyState>}
+          </Panel>
+
+          <Panel className="chart-panel" eyebrow="Daily focus" title="Tasks completed"
+            action={<span className="chart-unit">Self-reported count</span>}>
+            {chartData.some((item) => item.tasks !== null) ? (
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={chartData} margin={{ top: 8, right: 8, bottom: 2, left: -18 }}>
+                    <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
+                    <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} minTickGap={18} />
+                    <YAxis allowDecimals={false} tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 11 }} />
+                    <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text)' }}
+                      formatter={(value) => [value === null ? 'Not recorded' : `${value} tasks`, 'Tasks completed']} />
+                    <Line type="monotone" dataKey="tasks" name="Tasks completed" stroke="var(--blue)" strokeWidth={2.2} dot={false} connectNulls={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <EmptyState title="No task data in this range">Task counts are optional and are not a measure of well-being.</EmptyState>}
+          </Panel>
+        </div>
+
+        <div className="dashboard-grid lower-grid">
+          <Panel eyebrow="Check-in timeline" title={`Today · ${todayCheckIns.length} ${todayCheckIns.length === 1 ? 'entry' : 'entries'}`}
+            action={<button className="text-button" onClick={goToAction('checkin')}>Add check-in <ChevronRight size={14} /></button>}>
+            {recentCheckIns.length ? (
+              <div className="timeline-list">
+                {recentCheckIns.map((entry) => (
+                  <div className="timeline-row" key={entry.id}>
+                    <span className="timeline-marker" />
+                    <div className="timeline-main"><strong>{getDayPeriod(entry.recordedAt)}</strong><span>{new Date(entry.recordedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span></div>
+                    <div className="timeline-ratings"><span>Mood <b>{entry.mood}/5</b></span><span>Stress <b>{entry.stress}/5</b></span></div>
+                    <SourceBadge source={entry.source} />
+                  </div>
+                ))}
+              </div>
+            ) : <EmptyState title="No check-ins recorded today">There is no daily target. Add a reflection only if it is useful to you.</EmptyState>}
+          </Panel>
+          <Panel eyebrow="Worth a look" title={priorityInsight?.title ?? 'Patterns at a glance'}
+            action={<button className="text-button" onClick={goToAction('insights')}>All insights <ChevronRight size={14} /></button>}>
+            {priorityInsight ? <InsightCard insight={priorityInsight} /> : <EmptyState title="More history needed">Add records over time for a personal comparison.</EmptyState>}
+          </Panel>
+        </div>
+      </>
+    );
+  };
+
+  const renderCheckIn = () => (
+    <>
+      <PageHeading page="checkin">
+        <span className="privacy-inline"><ShieldCheck size={15} /> Stored in this browser</span>
+      </PageHeading>
+      <div className="two-column-layout">
+        <div className="form-stack">
+          <Panel className="form-panel" eyebrow="Personal reflection" title={moodForm.editingId ? 'Edit this check-in' : 'How are you feeling?'}>
+            <form onSubmit={saveMood} className="form-stack">
+            <label className="field">
+              <span>Date and time</span>
+              <input type="datetime-local" value={moodForm.recordedAt} max={toLocalDateTimeInput()}
+                onChange={(event) => {
+                  setMoodForm((previous) => ({ ...previous, recordedAt: event.target.value }));
+                  setMoodErrors((previous) => ({ ...previous, recordedAt: '' }));
+                }} />
+              {moodErrors.recordedAt && <span className="field-error">{moodErrors.recordedAt}</span>}
+            </label>
+            <div className="rating-grid">
+              <RatingScale label="Mood" hint="How does your mood feel right now?" value={moodForm.mood} onChange={(mood) => setMoodForm((previous) => ({ ...previous, mood }))} low="Very low" high="Very good" />
+              <RatingScale label="Stress" hint="Higher means more self-reported stress." value={moodForm.stress} onChange={(stress) => setMoodForm((previous) => ({ ...previous, stress }))} low="Very calm" high="Very high" />
+              <RatingScale label="Energy" hint="How much energy do you have?" value={moodForm.energy} onChange={(energy) => setMoodForm((previous) => ({ ...previous, energy }))} low="Very low" high="Very high" />
+              <RatingScale label="Fatigue" hint="Higher means more self-reported fatigue." value={moodForm.fatigue} onChange={(fatigue) => setMoodForm((previous) => ({ ...previous, fatigue }))} low="Well rested" high="Very tired" />
+            </div>
+            <label className="field">
+              <span>Optional note</span>
+              <textarea rows={3} maxLength={500} placeholder="Anything you want to remember about this moment?"
+                value={moodForm.note} onChange={(event) => setMoodForm((previous) => ({ ...previous, note: event.target.value }))} />
+              <small>Only stored locally. Avoid adding details you would not want saved in this browser.</small>
+            </label>
+            <div className="form-actions">
+              <button className="button button-primary" type="submit">{moodForm.editingId ? 'Update check-in' : 'Save check-in'} <ChevronRight size={16} /></button>
+              {moodForm.editingId && <button className="button button-quiet" type="button" onClick={() => { setMoodForm(newMoodForm()); setMoodErrors({}); }}>Cancel edit</button>}
+            </div>
+            <p className="form-footnote">Your ratings are personal reflections, not clinical measurements. You can record multiple check-ins on the same day.</p>
+            </form>
+          </Panel>
+          <Panel className="form-panel quick-activity-panel" eyebrow="Daily digital routine" title="Add an activity snapshot">
+            <p className="panel-copy">Keep activity and well-being in one daily flow. Activity is entered manually and may be saved separately from multiple mood check-ins.</p>
+            <form onSubmit={(event) => saveActivity(event)} className="form-stack quick-activity-form">
+              <div className="form-grid">
+                <label className="field"><span>Activity date</span>
+                  <input type="date" value={activityForm.date} max={today} onChange={(event) => {
+                    setActivityForm((previous) => ({ ...previous, date: event.target.value }));
+                    setActivityErrors((previous) => ({ ...previous, date: '' }));
+                  }} />
+                  {activityErrors.date && <span className="field-error">{activityErrors.date}</span>}
+                </label>
+                <label className="field"><span>Total screen time (hours) *</span>
+                  <input type="number" min="0" max="24" step="0.1" required value={activityForm.totalScreenTime}
+                    onChange={(event) => {
+                      setActivityForm((previous) => ({ ...previous, totalScreenTime: event.target.value }));
+                      setActivityErrors((previous) => ({ ...previous, totalScreenTime: '' }));
+                    }} />
+                  {activityErrors.totalScreenTime && <span className="field-error">{activityErrors.totalScreenTime}</span>}
+                </label>
+                <label className="field"><span>Active work / study (hours)</span>
+                  <input type="number" min="0" max="24" step="0.1" value={activityForm.workStudyHours}
+                    onChange={(event) => {
+                      setActivityForm((previous) => ({ ...previous, workStudyHours: event.target.value }));
+                      setActivityErrors((previous) => ({ ...previous, workStudyHours: '' }));
+                    }} />
+                  {activityErrors.workStudyHours && <span className="field-error">{activityErrors.workStudyHours}</span>}
+                </label>
+                <label className="field"><span>Late-night use (hours)</span>
+                  <input type="number" min="0" max="24" step="0.1" value={activityForm.lateNightUsage}
+                    onChange={(event) => {
+                      setActivityForm((previous) => ({ ...previous, lateNightUsage: event.target.value }));
+                      setActivityErrors((previous) => ({ ...previous, lateNightUsage: '' }));
+                    }} />
+                  {activityErrors.lateNightUsage && <span className="field-error">{activityErrors.lateNightUsage}</span>}
+                </label>
+                <label className="field"><span>Breaks taken</span>
+                  <input type="number" min="0" max="100" step="1" value={activityForm.breaks}
+                    onChange={(event) => {
+                      setActivityForm((previous) => ({ ...previous, breaks: event.target.value }));
+                      setActivityErrors((previous) => ({ ...previous, breaks: '' }));
+                    }} />
+                  {activityErrors.breaks && <span className="field-error">{activityErrors.breaks}</span>}
+                </label>
+                <label className="field"><span>Tasks completed</span>
+                  <input type="number" min="0" max="1000" step="1" value={activityForm.tasksCompleted}
+                    onChange={(event) => {
+                      setActivityForm((previous) => ({ ...previous, tasksCompleted: event.target.value }));
+                      setActivityErrors((previous) => ({ ...previous, tasksCompleted: '' }));
+                    }} />
+                  {activityErrors.tasksCompleted && <span className="field-error">{activityErrors.tasksCompleted}</span>}
+                </label>
+              </div>
+              <div className="form-actions">
+                <button className="button button-primary" type="submit">{activityForm.editingId ? 'Update activity' : 'Save activity'} <Activity size={15} /></button>
+                <button className="button button-quiet" type="button" onClick={() => navigate('activity')}>More activity fields</button>
+              </div>
+            </form>
+          </Panel>
+        </div>
+        <Panel className="list-panel" eyebrow="Your history" title={`${orderedCheckIns.length} check-ins`}>
+          {orderedCheckIns.length ? (
+            <div className="record-list">
+              {[...orderedCheckIns].reverse().map((entry) => (
+                <article className="record-row" key={entry.id}>
+                  <div className="record-date"><span>{formatDate(entry.date, { month: 'short', day: 'numeric' })}</span><small>{new Date(entry.recordedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</small></div>
+                  <div className="record-body"><strong>{getDayPeriod(entry.recordedAt)} check-in</strong>
+                    <span>Mood {entry.mood} · Stress {entry.stress} · Energy {entry.energy} · Fatigue {entry.fatigue}</span>
+                    {entry.note && <p>{entry.note}</p>}</div>
+                  <div className="record-tools"><SourceBadge source={entry.source} />
+                    <button className="icon-button" aria-label="Edit check-in" title="Edit" onClick={() => editMood(entry)}><span className="visually-hidden">Edit check-in</span><Activity size={15} /></button>
+                    <button className="icon-button danger" aria-label="Delete check-in" title="Delete" onClick={() => deleteMood(entry)}><span className="visually-hidden">Delete check-in</span><X size={15} /></button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          ) : <EmptyState title="Your check-ins will appear here">No entries yet. Your first reflection is always optional.</EmptyState>}
+        </Panel>
+      </div>
+    </>
+  );
+
+  const renderActivity = () => {
+    const clearActivityError = (field: string) => {
+      setActivityErrors((previous) => ({ ...previous, [field]: '' }));
+    };
+    const numberField = (
+      label: string,
+      key: ActivityNumericField,
+      options: { min?: number; max?: number; step?: number; required?: boolean; suffix?: string } = {},
+    ) => (
+      <label className="field" key={key}>
+        <span>{label}{options.required ? ' *' : ''}</span>
+        <div className="input-with-unit">
+          <input type="number" min={options.min ?? 0} max={options.max ?? 24} step={options.step ?? 'any'}
+            required={options.required} value={activityForm[key]}
+            onChange={(event) => {
+              setActivityForm((previous) => ({ ...previous, [key]: event.target.value }));
+              clearActivityError(key);
+            }} />
+          {options.suffix && <span>{options.suffix}</span>}
+        </div>
+        {activityErrors[key] && <span className="field-error">{activityErrors[key]}</span>}
+      </label>
+    );
+    return (
+      <>
+        <PageHeading page="activity"><span className="privacy-inline"><Clock3 size={15} /> Manual entry only</span></PageHeading>
+        <div className="two-column-layout activity-layout">
+          <Panel className="form-panel" eyebrow="Daily activity" title={activityForm.editingId ? 'Edit activity entry' : 'Add a daily snapshot'}>
+            <form onSubmit={saveActivity} className="form-stack">
+              <div className="form-grid">
+                <label className="field">
+                  <span>Date *</span>
+                  <input type="date" value={activityForm.date} max={today}
+                    onChange={(event) => {
+                      setActivityForm((previous) => ({ ...previous, date: event.target.value }));
+                      clearActivityError('date');
+                    }} />
+                  {activityErrors.date && <span className="field-error">{activityErrors.date}</span>}
+                </label>
+                {numberField('Total screen time', 'totalScreenTime', { max: 24, step: 0.1, required: true, suffix: 'hours' })}
+              </div>
+              <div className="form-section-heading"><span>Screen use</span><small>Categories are optional and should be within total screen time.</small></div>
+              <div className="form-grid">
+                {numberField('Work / study', 'workStudyHours', { suffix: 'hours' })}
+                {numberField('Social media', 'socialMediaHours', { suffix: 'hours' })}
+                {numberField('Entertainment', 'entertainmentHours', { suffix: 'hours' })}
+                {numberField('Late-night use', 'lateNightUsage', { suffix: 'hours' })}
+              </div>
+              <div className="form-section-heading"><span>Breaks & focus</span><small>Leave fields blank when you did not record them.</small></div>
+              <div className="form-grid">
+                {numberField('Number of breaks', 'breaks', { max: 100, step: 1, suffix: 'breaks' })}
+                {numberField('Average break duration', 'averageBreakMinutes', { max: 240, step: 1, suffix: 'minutes' })}
+                {numberField('Tasks completed', 'tasksCompleted', { max: 1000, step: 1, suffix: 'tasks' })}
+              </div>
+              <label className="field"><span>Optional note</span>
+                <textarea rows={2} maxLength={500} value={activityForm.notes} placeholder="Anything about this day you want to note?"
+                  onChange={(event) => setActivityForm((previous) => ({ ...previous, notes: event.target.value }))} />
+              </label>
+              <p className="form-footnote">Enter the total once. Work/study, social media, entertainment, and late-night use are each checked against that total; categories may overlap.</p>
+              <div className="form-actions">
+                <button className="button button-primary" type="submit">{activityForm.editingId ? 'Update activity' : 'Save activity'} <ChevronRight size={16} /></button>
+                {activityForm.editingId && <button className="button button-quiet" type="button" onClick={() => { setActivityForm(newActivityForm()); setActivityErrors({}); }}>Cancel edit</button>}
+                {!activityForm.editingId && <button className="button button-quiet" type="button" onClick={() => { setActivityForm(newActivityForm()); setActivityErrors({}); }}>Clear fields</button>}
+              </div>
+            </form>
+          </Panel>
+          <Panel className="list-panel" eyebrow="One activity record per day" title={`${orderedActivities.length} days recorded`}>
+            {orderedActivities.length ? (
+              <div className="record-list">
+                {[...orderedActivities].reverse().map((entry) => (
+                  <article className="record-row activity-record" key={entry.id}>
+                    <div className="record-date"><span>{formatDate(entry.date, { month: 'short', day: 'numeric' })}</span><small>{entry.totalScreenTime.toFixed(1)}h screen</small></div>
+                    <div className="record-body"><strong>{entry.breaks === undefined ? 'Breaks not recorded' : `${entry.breaks} breaks`}
+                      {entry.lateNightUsage !== undefined ? ` · ${entry.lateNightUsage.toFixed(1)}h late-night` : ''}</strong>
+                      <span>{entry.workStudyHours === undefined ? 'Work/study not recorded' : `${entry.workStudyHours.toFixed(1)}h work/study`}{entry.tasksCompleted === undefined ? '' : ` · ${entry.tasksCompleted} tasks`}</span>
+                      {entry.notes && <p>{entry.notes}</p>}
+                    </div>
+                    <div className="record-tools"><SourceBadge source={entry.source} />
+                      <button className="icon-button" aria-label="Edit activity entry" title="Edit" onClick={() => editActivity(entry)}><span className="visually-hidden">Edit activity entry</span><Activity size={15} /></button>
+                      <button className="icon-button danger" aria-label="Delete activity entry" title="Delete" onClick={() => deleteActivity(entry)}><span className="visually-hidden">Delete activity entry</span><X size={15} /></button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            ) : <EmptyState title="No activity entries yet">Start with total screen time. Other measurements are optional.</EmptyState>}
+          </Panel>
+        </div>
+      </>
+    );
+  };
+
+  const renderInsights = () => (
+    <>
+      <PageHeading page="insights" />
+      <div className="insight-overview-grid">
+        <Panel className="drift-panel" eyebrow="Personal activity pattern" title="Behavior drift">
+          <div className="drift-content">
+            <div className={`drift-number ${analysis.drift === null ? 'unavailable' : ''}`}>
+              {analysis.drift === null ? '—' : analysis.drift}<small>{analysis.drift === null ? '' : '/100'}</small>
+            </div>
+            <div><strong>{analysis.drift === null ? 'Not enough comparable data' : 'Deviation from your recent routine'}</strong>
+              <p>This is a transparent activity-pattern deviation indicator, not a stress score, health measure, or prediction.</p>
+              <span className="field-hint">{baseline.reason}</span>
+            </div>
+          </div>
+          {(baseline.activityComparisons.length > 0 || baseline.moodComparisons.length > 0) && (
+            <div className="comparison-list">
+              {baseline.activityComparisons.length > 0 && (
+                <>
+                  <div className="comparison-section-label">Digital activity</div>
+                  {baseline.activityComparisons.map((item) => (
+                    <div className="comparison-row" key={item.metric}><span>{item.metric}</span>
+                      <span>{item.baseline.toFixed(1)}{item.unit} baseline</span><b>{item.recent.toFixed(1)}{item.unit} recent</b>
+                      {item.recent > item.baseline ? <ArrowUpRight size={15} /> : item.recent < item.baseline ? <ArrowDownRight size={15} /> : <span className="comparison-equal">—</span>}
+                    </div>
+                  ))}
+                </>
+              )}
+              {baseline.moodComparisons.length > 0 && (
+                <>
+                  <div className="comparison-section-label">Self-reported ratings</div>
+                  {baseline.moodComparisons.map((item) => (
+                    <div className="comparison-row" key={item.metric}><span>{item.metric}</span>
+                      <span>{item.baseline.toFixed(1)}{item.unit} baseline</span><b>{item.recent.toFixed(1)}{item.unit} recent</b>
+                      {item.recent > item.baseline ? <ArrowUpRight size={15} /> : item.recent < item.baseline ? <ArrowDownRight size={15} /> : <span className="comparison-equal">—</span>}
+                    </div>
+                  ))}
+                </>
+              )}
+            </div>
+          )}
+        </Panel>
+        <Panel className="baseline-note" eyebrow="How to read this" title="Your routine is the reference">
+          <p>Each available measure compares your latest 7 days with the 21 days before that. A comparison appears only with at least 3 recent and 5 baseline records for that measure.</p>
+          <p>Behavior drift averages capped relative deviations for available activity measures (screen time, late-night use, breaks, and work/study). Missing measures are excluded; at least two comparisons are needed.</p>
+          <p>These are descriptive rules, not an AI model or clinical assessment. Screen time alone is never treated as proof of stress.</p>
+        </Panel>
+      </div>
+      <div className="section-title"><div><span className="eyebrow">Explainable patterns</span><h2>What changed</h2></div><span>{analysis.insights.length} observations</span></div>
+      <div className="insight-grid">{analysis.insights.map((insight) => <InsightCard key={insight.id} insight={insight} />)}</div>
+    </>
+  );
+
+  const renderRecommendations = () => (
+    <>
+      <PageHeading page="recommendations" />
+      <div className="recommendation-grid">
+        {recommendations.map((recommendation) => (
+          <article className="recommendation-card" key={recommendation.id}>
+            <div className={`recommendation-priority ${recommendation.priority}`}><Target size={15} /> {recommendation.priority}</div>
+            <h3>{recommendation.title}</h3><p>{recommendation.explanation}</p>
+            <div className="recommendation-evidence"><strong>What this is based on</strong><span>{recommendation.supportingObservation}</span></div>
+            <div className="recommendation-action"><Check size={16} /><span>{recommendation.suggestedAction}</span></div>
+          </article>
+        ))}
+      </div>
+      <p className="recommendations-disclaimer">Suggestions are optional, based on your recorded information, and are not medical advice.</p>
+    </>
+  );
+
+  const renderDemo = () => {
+    const latestTodayMood = todayCheckIns.at(-1);
+    const todayActivity = todaySummary?.activity;
+    return (
+      <>
+        <PageHeading page="demo">
+          <span className="privacy-inline"><ShieldCheck size={15} /> Uses illustrative sample records</span>
+        </PageHeading>
+        <div className="demo-intro-grid">
+          <Panel className="demo-start-panel" eyebrow="Try the experience" title="Your check-in updates the story">
+            <p className="panel-copy">This is a working prototype, not a video or a scripted simulation. Submit a reflection or activity snapshot, then see the dashboard and rule-based observations update from the same browser data.</p>
+            <div className="demo-steps">
+              <div><span>01</span><strong>Record</strong><small>Add a daily check-in or activity snapshot.</small></div>
+              <div><span>02</span><strong>Review</strong><small>See recorded values in your dashboard and history.</small></div>
+              <div><span>03</span><strong>Reflect</strong><small>Explore comparisons and practical suggestions.</small></div>
+            </div>
+            <div className="form-actions demo-actions">
+              <button className="button button-primary" onClick={goToAction('checkin')}>Complete a check-in <ChevronRight size={15} /></button>
+              <button className="button button-quiet" onClick={goToAction('overview')}>View dashboard</button>
+            </div>
+          </Panel>
+          <Panel className="demo-live-panel" eyebrow="Live sample state" title="What the prototype currently sees">
+            <div className="demo-live-values">
+              <div><span>Today’s screen time</span><strong>{todayActivity ? `${todayActivity.totalScreenTime.toFixed(1)}h` : 'Not recorded'}</strong></div>
+              <div><span>Most recent stress</span><strong>{latestTodayMood ? `${latestTodayMood.stress} / 5` : 'Not recorded'}</strong></div>
+              <div><span>Most recent fatigue</span><strong>{latestTodayMood ? `${latestTodayMood.fatigue} / 5` : 'Not recorded'}</strong></div>
+              <div><span>Behavior drift</span><strong>{analysis.drift === null ? 'Insufficient history' : `${analysis.drift} / 100`}</strong></div>
+            </div>
+            <div className="demo-live-insight">
+              <span className="eyebrow">Current observation</span>
+              <strong>{analysis.insights[0]?.title ?? 'More history needed'}</strong>
+              <p>{analysis.insights[0]?.description ?? 'Record data over time to create a personal comparison.'}</p>
+            </div>
+            <button className="text-button" onClick={goToAction('recommendations')}>See related suggestions <ChevronRight size={14} /></button>
+          </Panel>
+        </div>
+      </>
+    );
+  };
+
+  const renderHistory = () => {
+    const rangedSummaries = filterByRange(allSummaries, historyRange);
+    const historyChartData = rangedSummaries.map((summary) => ({
+      date: formatDate(summary.date),
+      screenTime: summary.activity?.totalScreenTime ?? null,
+      mood: summary.averageMood === null ? null : Number(summary.averageMood.toFixed(2)),
+      stress: summary.averageStress === null ? null : Number(summary.averageStress.toFixed(2)),
+      fatigue: summary.averageFatigue === null ? null : Number(summary.averageFatigue.toFixed(2)),
+    }));
+    const summaries = rangedSummaries.filter((item) => {
+      if (!historySearch.trim()) return true;
+      const query = historySearch.toLowerCase();
+      return item.date.includes(query) || item.checkIns.some((entry) => entry.note.toLowerCase().includes(query))
+        || item.activity?.notes?.toLowerCase().includes(query) === true;
+    }).reverse();
+    return (
+      <>
+        <PageHeading page="history">
+          <button className="button button-quiet" onClick={exportData}><Download size={16} /> Export JSON</button>
+        </PageHeading>
+        <div className="history-trend-grid">
+          <Panel className="chart-panel" eyebrow="Historical activity" title="Screen time"
+            action={<span className="chart-unit">Hours per day</span>}>
+            {historyChartData.some((item) => item.screenTime !== null) ? (
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={historyChartData} margin={{ top: 8, right: 8, bottom: 2, left: -18 }}>
+                    <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
+                    <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} minTickGap={18} />
+                    <YAxis tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} unit="h" />
+                    <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text)' }}
+                      formatter={(value) => [value === null ? 'Not recorded' : `${Number(value).toFixed(1)}h`, 'Screen time']} />
+                    <Line type="monotone" dataKey="screenTime" name="Screen time" stroke="var(--teal)" strokeWidth={2.2} dot={false} connectNulls={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <EmptyState title="No activity in this range">Activity trends appear after entries are recorded.</EmptyState>}
+          </Panel>
+          <Panel className="chart-panel" eyebrow="Historical check-ins" title="Mood, stress & fatigue"
+            action={<span className="chart-unit">Scale of 1–5</span>}>
+            {historyChartData.some((item) => item.mood !== null || item.stress !== null || item.fatigue !== null) ? (
+              <div className="chart-container">
+                <ResponsiveContainer width="100%" height="100%">
+                  <LineChart data={historyChartData} margin={{ top: 8, right: 8, bottom: 2, left: -20 }}>
+                    <CartesianGrid vertical={false} stroke="var(--chart-grid)" strokeDasharray="4 5" />
+                    <XAxis dataKey="date" tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} minTickGap={18} />
+                    <YAxis domain={[1, 5]} ticks={[1, 2, 3, 4, 5]} tickLine={false} axisLine={false} tick={{ fill: 'var(--text-muted)', fontSize: 10 }} />
+                    <Tooltip contentStyle={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 12, color: 'var(--text)' }}
+                      formatter={(value, name) => [value === null ? 'Not recorded' : `${Number(value).toFixed(1)} / 5`, name]} />
+                    <Legend wrapperStyle={{ color: 'var(--text-muted)', fontSize: 11 }} />
+                    <Line type="monotone" dataKey="mood" name="Mood" stroke="var(--teal)" strokeWidth={2} dot={false} connectNulls={false} />
+                    <Line type="monotone" dataKey="stress" name="Stress" stroke="var(--coral)" strokeWidth={2} dot={false} connectNulls={false} />
+                    <Line type="monotone" dataKey="fatigue" name="Fatigue" stroke="var(--amber)" strokeWidth={2} dot={false} connectNulls={false} />
+                  </LineChart>
+                </ResponsiveContainer>
+              </div>
+            ) : <EmptyState title="No check-ins in this range">Ratings only appear when you choose to record them.</EmptyState>}
+          </Panel>
+        </div>
+        <Panel className="history-controls">
+          <div className="history-toolbar">
+            <label className="search-field"><span className="visually-hidden">Search history notes or dates</span>
+              <input type="search" placeholder="Search notes or dates…" value={historySearch} onChange={(event) => setHistorySearch(event.target.value)} />
+            </label>
+            <div className="range-switcher" role="group" aria-label="History date range">
+              {(['7d', '30d', 'all'] as const).map((item) => (
+                <button key={item} className={historyRange === item ? 'range-button selected' : 'range-button'} onClick={() => setHistoryRange(item)}>
+                  {item === 'all' ? 'All time' : item === '7d' ? '7 days' : '30 days'}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className="history-count">Showing {summaries.length} {summaries.length === 1 ? 'day' : 'days'} with at least one record. Missing activity or check-ins are left blank.</p>
+        </Panel>
+        <div className="history-days">
+          {summaries.length ? summaries.map((summary) => (
+            <Panel className="day-card" key={summary.date}>
+              <div className="day-heading">
+                <div><span className="eyebrow">{formatDate(summary.date, { weekday: 'long' })}</span><h2>{formatDate(summary.date, { month: 'long', day: 'numeric', year: 'numeric' })}</h2></div>
+                {summary.activity && <SourceBadge source={summary.activity.source} />}
+              </div>
+              <div className="day-summary-grid">
+                <div className="daily-activity-summary">
+                  <h3><Activity size={16} /> Activity</h3>
+                  {summary.activity ? (
+                    <>
+                      <p><strong>{summary.activity.totalScreenTime.toFixed(1)}h</strong> total screen time</p>
+                      <p>{summary.activity.lateNightUsage === undefined ? 'Late-night use not recorded' : `${summary.activity.lateNightUsage.toFixed(1)}h late-night`}
+                        {' · '}{summary.activity.breaks === undefined ? 'Breaks not recorded' : `${summary.activity.breaks} breaks`}</p>
+                      <button className="text-button" onClick={() => { if (summary.activity) editActivity(summary.activity); }}>Edit activity <ChevronRight size={13} /></button>
+                    </>
+                  ) : <p className="missing-data">No activity record for this day.</p>}
+                </div>
+                <div className="daily-checkins-summary">
+                  <h3><Heart size={16} /> Check-ins <span>{summary.checkIns.length}</span></h3>
+                  {summary.checkIns.length ? summary.checkIns.map((entry) => (
+                    <div className="history-checkin" key={entry.id}>
+                      <div className="history-checkin-top"><strong>{getDayPeriod(entry.recordedAt)}</strong><span>{new Date(entry.recordedAt).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}</span><SourceBadge source={entry.source} /></div>
+                      <p>Mood {entry.mood}/5 · Stress {entry.stress}/5 · Energy {entry.energy}/5 · Fatigue {entry.fatigue}/5</p>
+                      {entry.note && <p className="history-note">{entry.note}</p>}
+                      <div className="record-action-links"><button className="text-button" onClick={() => editMood(entry)}>Edit</button><button className="text-button danger-text" onClick={() => deleteMood(entry)}>Delete</button></div>
+                    </div>
+                  )) : <p className="missing-data">No check-in recorded for this day.</p>}
+                  <button className="text-button" onClick={() => { setMoodForm({ ...newMoodForm(), recordedAt: toLocalDateTimeInput(new Date(`${summary.date}T12:00:00`)) }); navigate('checkin'); }}>Add check-in <ChevronRight size={13} /></button>
+                </div>
+              </div>
+            </Panel>
+          )) : <EmptyState title="No records match this view">Try another date range or search term, or start recording activity and check-ins.</EmptyState>}
+        </div>
+      </>
+    );
+  };
+
+  const renderSettings = () => (
+    <>
+      <PageHeading page="settings" />
+      <div className="settings-grid">
+        <Panel eyebrow="Appearance" title="Choose your theme">
+          <p className="panel-copy">Your preference is saved with your local app data. First visit follows your device setting.</p>
+          <div className="theme-picker" role="group" aria-label="Theme preference">
+            <button className={data.preferences.theme === 'light' ? 'theme-choice selected' : 'theme-choice'} onClick={() => setTheme('light')} aria-pressed={data.preferences.theme === 'light'}><Sun size={18} /> Light {data.preferences.theme === 'light' && <Check size={15} />}</button>
+            <button className={data.preferences.theme === 'dark' ? 'theme-choice selected' : 'theme-choice'} onClick={() => setTheme('dark')} aria-pressed={data.preferences.theme === 'dark'}><Moon size={18} /> Dark {data.preferences.theme === 'dark' && <Check size={15} />}</button>
+          </div>
+        </Panel>
+        <Panel eyebrow="Data location" title="Local to this browser">
+          <div className="privacy-callout"><ShieldCheck size={18} /><p>Your records are stored in this browser’s local storage. This prototype does not sync to a server or send data to an AI service.</p></div>
+          <ul className="privacy-list"><li>Clearing browser site data may remove your entries.</li><li>Do not use a shared device for sensitive notes.</li><li>No device tracking or automatic collection is used.</li></ul>
+        </Panel>
+        <Panel eyebrow="Your records" title="Data controls">
+          <div className="data-counts"><div><strong>{sourceSummary.userCount}</strong><span>Personal entries</span></div><div><strong>{sourceSummary.demoCount}</strong><span>Sample entries</span></div></div>
+          <div className="data-actions">
+            <button className="button button-quiet" onClick={exportData}><Download size={16} /> Download JSON export</button>
+            <button className="button button-quiet" onClick={clearPersonalData}>Clear personal data</button>
+            <button className="button button-danger" onClick={resetToDemo}>Restore sample data</button>
+          </div>
+          <p className="field-hint">Clearing personal data keeps clearly labeled sample records. Restoring sample data replaces all saved entries.</p>
+        </Panel>
+        <Panel eyebrow="How observations work" title="Deterministic, not diagnostic">
+          <p className="panel-copy">MindTrace uses transparent TypeScript rules to compare recent entries with a personal baseline. It does not currently use an AI model, make predictions, or diagnose health conditions.</p>
+          <p className="panel-copy">Patterns are descriptive and can be incomplete. A change in screen time or a self-reported rating is not proof of stress or a medical condition.</p>
+          <div className="disclaimer">Wellness support only · Not medical advice</div>
+        </Panel>
+        <Panel className="export-format-panel" eyebrow="Portability" title="JSON export format">
+          <p className="panel-copy">The downloaded file contains a <code>format</code> version, export timestamp, check-ins, activity entries, and theme preference. This version supports export only; it does not upload data.</p>
+        </Panel>
+      </div>
+    </>
+  );
+
+  const pageContent: Record<AppPage, () => ReactNode> = {
+    overview: renderOverview,
+    checkin: renderCheckIn,
+    activity: renderActivity,
+    insights: renderInsights,
+    recommendations: renderRecommendations,
+    history: renderHistory,
+    settings: renderSettings,
+    demo: renderDemo,
+  };
+  const ActiveIcon = navItems.find((item) => item.id === activePage)?.icon ?? LayoutDashboard;
+
+  return (
+    <div className="app-frame">
+      <a className="skip-link" href="#main-content">Skip to content</a>
+      <aside className={mobileMenuOpen ? 'sidebar mobile-open' : 'sidebar'}>
+        <div className="brand-lockup">
+          <div className="brand-mark"><Brain size={21} /></div>
+          <div><strong>mindtrace<span>.</span></strong><small>PERSONAL WELLNESS</small></div>
+          <button className="mobile-close icon-button" aria-label="Close navigation" onClick={() => setMobileMenuOpen(false)}><X size={18} /></button>
+        </div>
+        <div className="sidebar-label">WORKSPACE</div>
+        <nav className="primary-nav" aria-label="Main navigation">
+          {navItems.map(({ id, label, icon: Icon }) => (
+            <button key={id} className={activePage === id ? 'nav-link active' : 'nav-link'}
+              aria-current={activePage === id ? 'page' : undefined} onClick={() => navigate(id)}>
+              <Icon size={17} strokeWidth={1.8} /><span>{label}</span>{activePage === id && <span className="nav-indicator" />}
             </button>
           ))}
         </nav>
-
-        <div className="sidebar-card">
-          <div className="sidebar-card-header">
-            <NotebookPen size={16} />
-            <span>Prototype note</span>
-          </div>
-          <p>
-            MindTrace uses deterministic rules to compare behavior with your own baseline and suggest supportive next steps.
-          </p>
+        <div className="sidebar-bottom">
+          <div className="local-status"><span className="status-pip" /><div><strong>Private by design</strong><small>Stored on this device</small></div></div>
+          <button className="sidebar-theme" onClick={() => setTheme(data.preferences.theme === 'light' ? 'dark' : 'light')}>
+            {data.preferences.theme === 'light' ? <Moon size={16} /> : <Sun size={16} />}
+            <span>Switch to {data.preferences.theme === 'light' ? 'dark' : 'light'} theme</span>
+          </button>
+          <div className="sidebar-disclaimer">A gentle reflection tool.<br />Not a clinical assessment.</div>
         </div>
       </aside>
-
-      <main className="main-panel">
+      {mobileMenuOpen && <button className="sidebar-scrim" aria-label="Close navigation menu" onClick={() => setMobileMenuOpen(false)} />}
+      <div className="main-column">
         <header className="topbar">
-          <button type="button" className="mobile-toggle" onClick={() => setMobileMenuOpen((open) => !open)}>
-            {mobileMenuOpen ? <X size={18} /> : <Menu size={18} />}
-          </button>
-          <div className="topbar-actions">
-            <button type="button" className="inline-action" onClick={() => setActivePage('overview')}>
-              <RefreshCcw size={15} />
-              Refresh snapshot
+          <button className="menu-button icon-button" aria-label="Open navigation" onClick={() => setMobileMenuOpen(true)}><Menu size={20} /></button>
+          <div className="breadcrumb"><ActiveIcon size={15} /><span>{navItems.find((item) => item.id === activePage)?.label}</span></div>
+          <div className="topbar-right"><span className="current-date"><CalendarDays size={15} />{formatDate(today, { weekday: 'short', month: 'short', day: 'numeric' })}</span>
+            <button className="theme-toggle icon-button" aria-label={`Switch to ${data.preferences.theme === 'light' ? 'dark' : 'light'} theme`}
+              title={`Switch to ${data.preferences.theme === 'light' ? 'dark' : 'light'} theme`}
+              onClick={() => setTheme(data.preferences.theme === 'light' ? 'dark' : 'light')}>
+              {data.preferences.theme === 'light' ? <Moon size={17} /> : <Sun size={17} />}
             </button>
+            <button className="topbar-checkin" onClick={goToAction('checkin')}><Plus size={15} /> Check in</button>
           </div>
         </header>
-
-        {renderPageContent()}
-      </main>
+        <main id="main-content" className="main-content" tabIndex={-1}>
+          {pageContent[activePage]()}
+          <footer className="app-footer"><span>MindTrace AI</span><span>Designed for reflection, not diagnosis.</span></footer>
+        </main>
+      </div>
+      {notice && <div className={`notice ${/could not|failed|unavailable/i.test(notice) ? 'warning' : ''}`} role="status">
+        <span>{/could not|failed|unavailable/i.test(notice) ? <ShieldCheck size={16} /> : <Check size={16} />}</span>{notice}
+        <button aria-label="Dismiss notification" onClick={() => setNotice(null)}><X size={15} /></button>
+      </div>}
     </div>
   );
 }

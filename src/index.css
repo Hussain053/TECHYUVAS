@@ -1,27 +1,16 @@
-:root {
-  font-family: Inter, 'Segoe UI', Roboto, sans-serif;
-  line-height: 1.5;
-  font-weight: 400;
-  color: #122033;
-  background: #f4efe9;
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-}
-
 * {
   box-sizing: border-box;
 }
 
 html {
+  min-width: 320px;
   scroll-behavior: smooth;
 }
 
 body {
   margin: 0;
+  min-width: 320px;
   min-height: 100vh;
-  background: #f4efe9;
 }
 
 button,
@@ -32,11 +21,6 @@ textarea {
 
 button {
   cursor: pointer;
-}
-
-img {
-  max-width: 100%;
-  display: block;
 }
 
 #root {

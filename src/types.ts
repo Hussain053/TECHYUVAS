@@ -1,10 +1,21 @@
-export type NavPage = 'overview' | 'mood' | 'activity' | 'insights' | 'settings';
+export type AppPage =
+  | 'overview'
+  | 'checkin'
+  | 'activity'
+  | 'insights'
+  | 'recommendations'
+  | 'history'
+  | 'settings'
+  | 'demo';
 
 export type SourceKind = 'demo' | 'user';
+export type ThemePreference = 'light' | 'dark';
+export type InsightStatus = 'steady' | 'notice' | 'combined' | 'insufficient';
 
 export interface MoodCheckIn {
   id: string;
   date: string;
+  recordedAt: string;
   mood: number;
   stress: number;
   energy: number;
@@ -13,30 +24,58 @@ export interface MoodCheckIn {
   source: SourceKind;
 }
 
-export interface ActivityEntry {
+export interface DailyActivity {
   id: string;
   date: string;
   totalScreenTime: number;
-  activeWorkHours: number;
-  socialMediaHours: number;
-  entertainmentHours: number;
-  lateNightUsage: number;
-  breaks: number;
-  averageBreakMinutes: number;
-  tasksCompleted: number;
+  workStudyHours?: number;
+  socialMediaHours?: number;
+  entertainmentHours?: number;
+  lateNightUsage?: number;
+  breaks?: number;
+  averageBreakMinutes?: number;
+  tasksCompleted?: number;
+  notes?: string;
   source: SourceKind;
 }
 
-export interface Insight {
+export interface DailySummary {
+  date: string;
+  activity: DailyActivity | null;
+  checkIns: MoodCheckIn[];
+  averageMood: number | null;
+  averageStress: number | null;
+  averageEnergy: number | null;
+  averageFatigue: number | null;
+}
+
+export interface BehaviorInsight {
   id: string;
   title: string;
   description: string;
-  recommendation: string;
-  priority: 'low' | 'medium' | 'high';
+  evidence: string;
+  status: InsightStatus;
+  metric?: string;
+  recentValue?: number;
+  baselineValue?: number;
 }
 
-export interface BehaviorDriftResult {
-  value: number | null;
-  label: string;
+export interface Recommendation {
+  id: string;
+  title: string;
   explanation: string;
+  supportingObservation: string;
+  suggestedAction: string;
+  priority: 'gentle' | 'consider' | 'useful';
+  relatedInsightId?: string;
+}
+
+export interface UserPreferences {
+  theme: ThemePreference;
+}
+
+export interface AppData {
+  moodCheckIns: MoodCheckIn[];
+  activityEntries: DailyActivity[];
+  preferences: UserPreferences;
 }
