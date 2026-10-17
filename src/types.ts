@@ -7,6 +7,8 @@ export type AppPage =
   | 'weekly'
   | 'goals'
   | 'history'
+  | 'simulator'
+  | 'replay'
   | 'settings'
   | 'demo';
 

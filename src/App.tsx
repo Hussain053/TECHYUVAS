@@ -15,12 +15,17 @@ import {
   LayoutDashboard,
   Menu,
   Moon,
+  Pause,
+  Play,
   Plus,
   Printer,
   ShieldCheck,
+  SlidersHorizontal,
   Sun,
   Target,
   ThumbsUp,
+  SkipBack,
+  SkipForward,
   X,
 } from 'lucide-react';
 import {
@@ -71,6 +76,8 @@ const navItems: Array<{ id: AppPage; label: string; icon: typeof LayoutDashboard
   { id: 'weekly', label: 'Weekly report', icon: CalendarDays },
   { id: 'goals', label: 'My goals', icon: Target },
   { id: 'history', label: 'History & trends', icon: BarChart3 },
+  { id: 'simulator', label: 'Routine simulator', icon: SlidersHorizontal },
+  { id: 'replay', label: 'Behaviour replay', icon: Play },
   { id: 'settings', label: 'Privacy & data', icon: ShieldCheck },
   { id: 'demo', label: 'Interactive demo', icon: Compass },
 ];
@@ -108,6 +115,14 @@ const pageCopy: Record<AppPage, { title: string; description: string }> = {
     title: 'Your history',
     description: 'See mood check-ins and activity together, day by day.',
   },
+  simulator: {
+    title: 'Explore a routine change',
+    description: 'Adjust a few routine inputs and compare the scenario with your recent records—without changing your data.',
+  },
+  replay: {
+    title: 'Replay your recorded days',
+    description: 'Move through your saved activity and check-ins one day at a time.',
+  },
   settings: {
     title: 'Your privacy & data',
     description: 'Understand what is stored here and stay in control of your preferences.',
@@ -143,6 +158,12 @@ type ActivityForm = {
   tasksCompleted: string;
   notes: string;
   editingId: string | null;
+};
+
+type RoutineScenario = {
+  screenTime: number;
+  lateNightUsage: number;
+  breaks: number;
 };
 
 type ActivityNumericField =
@@ -363,6 +384,13 @@ function App() {
   const [activityForm, setActivityForm] = useState<ActivityForm>(() => newActivityForm());
   const [moodErrors, setMoodErrors] = useState<Record<string, string>>({});
   const [activityErrors, setActivityErrors] = useState<Record<string, string>>({});
+  const [routineScenario, setRoutineScenario] = useState<RoutineScenario>({
+    screenTime: 6,
+    lateNightUsage: 1,
+    breaks: 4,
+  });
+  const [replayIndex, setReplayIndex] = useState(0);
+  const [replayPlaying, setReplayPlaying] = useState(false);
   const [range, setRange] = useState<DateRange>('7d');
   const [historyRange, setHistoryRange] = useState<DateRange>('30d');
   const [historySearch, setHistorySearch] = useState('');
@@ -404,6 +432,13 @@ function App() {
     () => buildDailySummaries(visibleActivities, visibleCheckIns),
     [visibleActivities, visibleCheckIns],
   );
+  useEffect(() => {
+    if (!replayPlaying || allSummaries.length < 2) return undefined;
+    const timer = window.setInterval(() => {
+      setReplayIndex((index) => (index + 1) % allSummaries.length);
+    }, 1400);
+    return () => window.clearInterval(timer);
+  }, [allSummaries.length, replayPlaying]);
   const baseline = useMemo(
     () => analyzeBaseline(visibleActivities, visibleCheckIns),
     [visibleActivities, visibleCheckIns],
@@ -437,6 +472,7 @@ function App() {
 
   const navigate = (page: AppPage) => {
     setActivePage(page);
+    if (page !== 'replay') setReplayPlaying(false);
     setMobileMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -446,6 +482,8 @@ function App() {
   };
 
   const setDataMode = (dataMode: DataMode) => {
+    setReplayIndex(0);
+    setReplayPlaying(false);
     setGoalDraft({
       dailyScreenTimeHours: data.preferences.wellnessGoals[dataMode].dailyScreenTimeHours?.toString() ?? '',
       dailyBreaks: data.preferences.wellnessGoals[dataMode].dailyBreaks?.toString() ?? '',
@@ -1691,6 +1729,135 @@ function App() {
     );
   };
 
+  const renderRoutineSimulator = () => {
+    const recentStartDate = new Date(`${today}T12:00:00`);
+    recentStartDate.setDate(recentStartDate.getDate() - 6);
+    const recentStart = localDateKey(recentStartDate);
+    const recentActivities = visibleActivities.filter((entry) => entry.date >= recentStart && entry.date <= today);
+    const average = (values: number[]) => values.length
+      ? values.reduce((sum, value) => sum + value, 0) / values.length
+      : null;
+    const recentScreenTime = average(recentActivities.map((entry) => entry.totalScreenTime));
+    const recentLateNight = average(recentActivities
+      .map((entry) => entry.lateNightUsage)
+      .filter((value): value is number => value !== undefined));
+    const recentBreaks = average(recentActivities
+      .map((entry) => entry.breaks)
+      .filter((value): value is number => value !== undefined));
+    const differenceLabel = (scenarioValue: number, observedValue: number | null, unit: string) => {
+      if (observedValue === null) return 'Add activity records to compare this scenario with your routine.';
+      const difference = scenarioValue - observedValue;
+      if (Math.abs(difference) < 0.05) return `About the same as your recent average of ${observedValue.toFixed(1)}${unit}.`;
+      return `${Math.abs(difference).toFixed(1)}${unit} ${difference > 0 ? 'above' : 'below'} your recent average of ${observedValue.toFixed(1)}${unit}.`;
+    };
+    const hasRecentValues = recentScreenTime !== null || recentLateNight !== null || recentBreaks !== null;
+
+    return (
+      <>
+        <PageHeading page="simulator" />
+        <div className="simulator-notice"><SlidersHorizontal size={17} /><p>Try a possible daily routine. These controls only change this preview; they do not save records, change your baseline, or predict stress.</p></div>
+        <div className="simulator-grid">
+          <Panel eyebrow="Adjust the scenario" title="What would your day look like?">
+            <div className="simulator-controls">
+              <label className="simulator-control" htmlFor="scenario-screen-time">
+                <span><strong>Total screen time</strong><output>{routineScenario.screenTime.toFixed(1)} hours</output></span>
+                <input id="scenario-screen-time" type="range" min="0" max="24" step="0.5" value={routineScenario.screenTime}
+                  onChange={(event) => setRoutineScenario((previous) => ({ ...previous, screenTime: Number(event.target.value) }))} />
+              </label>
+              <label className="simulator-control" htmlFor="scenario-late-night">
+                <span><strong>Late-night screen time</strong><output>{routineScenario.lateNightUsage.toFixed(1)} hours</output></span>
+                <input id="scenario-late-night" type="range" min="0" max="24" step="0.5" value={routineScenario.lateNightUsage}
+                  onChange={(event) => setRoutineScenario((previous) => ({ ...previous, lateNightUsage: Number(event.target.value) }))} />
+              </label>
+              <label className="simulator-control" htmlFor="scenario-breaks">
+                <span><strong>Breaks during the day</strong><output>{routineScenario.breaks}</output></span>
+                <input id="scenario-breaks" type="range" min="0" max="16" step="1" value={routineScenario.breaks}
+                  onChange={(event) => setRoutineScenario((previous) => ({ ...previous, breaks: Number(event.target.value) }))} />
+              </label>
+              <button className="button button-quiet simulator-reset" type="button"
+                disabled={!hasRecentValues}
+                onClick={() => setRoutineScenario((previous) => ({
+                  screenTime: recentScreenTime === null ? previous.screenTime : Math.min(24, Math.round(recentScreenTime * 2) / 2),
+                  lateNightUsage: recentLateNight === null ? previous.lateNightUsage : Math.min(24, Math.round(recentLateNight * 2) / 2),
+                  breaks: recentBreaks === null ? previous.breaks : Math.min(16, Math.round(recentBreaks)),
+                }))}>
+                Use recent recorded averages
+              </button>
+            </div>
+          </Panel>
+          <Panel eyebrow="Scenario preview" title="Compared with your recent routine">
+            <div className="simulator-comparisons">
+              <div><span>Total screen time</span><strong>{routineScenario.screenTime.toFixed(1)}h</strong><p>{differenceLabel(routineScenario.screenTime, recentScreenTime, 'h')}</p></div>
+              <div><span>Late-night use</span><strong>{routineScenario.lateNightUsage.toFixed(1)}h</strong><p>{differenceLabel(routineScenario.lateNightUsage, recentLateNight, 'h')}</p></div>
+              <div><span>Breaks</span><strong>{routineScenario.breaks}</strong><p>{differenceLabel(routineScenario.breaks, recentBreaks, ' breaks')}</p></div>
+            </div>
+            <p className="weekly-context-note">Comparison uses your last 7 calendar days in the {data.preferences.dataMode === 'demo' ? 'illustrative sample' : 'Personal'} workspace. It describes a hypothetical routine, not an outcome.</p>
+          </Panel>
+        </div>
+      </>
+    );
+  };
+
+  const renderBehaviorReplay = () => {
+    const selectedIndex = Math.min(replayIndex, Math.max(0, allSummaries.length - 1));
+    const summary = allSummaries[selectedIndex];
+
+    return (
+      <>
+        <PageHeading page="replay" />
+        {summary ? (
+          <Panel className="replay-panel" eyebrow={data.preferences.dataMode === 'demo' ? 'Illustrative sample history' : 'Your recorded history'}
+            title={formatDate(summary.date, { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })}>
+            <div className="replay-controls">
+              <button className="icon-button" type="button" aria-label="Previous recorded day" disabled={selectedIndex === 0}
+                onClick={() => { setReplayPlaying(false); setReplayIndex(selectedIndex - 1); }}><SkipBack size={17} /></button>
+              <button className="button button-primary" type="button" aria-label={replayPlaying ? 'Pause replay' : 'Play replay'}
+                disabled={allSummaries.length < 2}
+                onClick={() => setReplayPlaying((playing) => !playing)}>
+                {replayPlaying ? <Pause size={16} /> : <Play size={16} />}
+                {replayPlaying ? 'Pause' : 'Play days'}
+              </button>
+              <button className="icon-button" type="button" aria-label="Next recorded day" disabled={selectedIndex >= allSummaries.length - 1}
+                onClick={() => { setReplayPlaying(false); setReplayIndex(selectedIndex + 1); }}><SkipForward size={17} /></button>
+              <span className="replay-position">Day {selectedIndex + 1} of {allSummaries.length}</span>
+            </div>
+            <label className="replay-scrubber" htmlFor="replay-day">
+              <span className="visually-hidden">Select a recorded day</span>
+              <input id="replay-day" type="range" min="0" max={allSummaries.length - 1} step="1" value={selectedIndex}
+                onChange={(event) => { setReplayPlaying(false); setReplayIndex(Number(event.target.value)); }} />
+              <span>{formatDate(allSummaries[0].date)} <span>→</span> {formatDate(allSummaries[allSummaries.length - 1].date)}</span>
+            </label>
+            <div className="replay-day-grid" aria-live="polite">
+              <article>
+                <span className="eyebrow">Digital activity</span>
+                {summary.activity ? (
+                  <>
+                    <strong>{summary.activity.totalScreenTime.toFixed(1)}h screen time</strong>
+                    <p>{summary.activity.lateNightUsage === undefined ? 'Late-night use not recorded' : `${summary.activity.lateNightUsage.toFixed(1)}h late-night use`}</p>
+                    <p>{summary.activity.breaks === undefined ? 'Breaks not recorded' : `${summary.activity.breaks} breaks recorded`}</p>
+                  </>
+                ) : <p className="missing-data">No activity record for this day.</p>}
+              </article>
+              <article>
+                <span className="eyebrow">Self-reported check-ins</span>
+                {summary.checkIns.length ? (
+                  <>
+                    <strong>{summary.checkIns.length} {summary.checkIns.length === 1 ? 'check-in' : 'check-ins'}</strong>
+                    <p>Mood {summary.averageMood?.toFixed(1) ?? '—'} · Stress {summary.averageStress?.toFixed(1) ?? '—'} · Energy {summary.averageEnergy?.toFixed(1) ?? '—'}</p>
+                    <p>Fatigue {summary.averageFatigue?.toFixed(1) ?? '—'} / 5</p>
+                  </>
+                ) : <p className="missing-data">No check-in recorded for this day.</p>}
+              </article>
+            </div>
+          </Panel>
+        ) : (
+          <EmptyState title="No recorded days to replay">Add an activity snapshot or a check-in to see it appear here.</EmptyState>
+        )}
+        <p className="weekly-context-note">Replay steps through recorded dates only. Missing days are not filled in or inferred.</p>
+      </>
+    );
+  };
+
   const renderSettings = () => (
     <>
       <PageHeading page="settings" />
@@ -1764,6 +1931,8 @@ function App() {
     weekly: renderWeeklyReport,
     goals: renderGoals,
     history: renderHistory,
+    simulator: renderRoutineSimulator,
+    replay: renderBehaviorReplay,
     settings: renderSettings,
     demo: renderDemo,
   };
