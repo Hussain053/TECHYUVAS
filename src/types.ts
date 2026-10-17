@@ -6,12 +6,69 @@ export type AppPage =
   | 'recommendations'
   | 'history'
   | 'settings'
-  | 'demo';
+  | 'demo'
+  | 'simulator'
+  | 'doppelganger';
 
 export type SourceKind = 'demo' | 'user';
 export type ThemePreference = 'light' | 'dark';
 export type DataMode = 'demo' | 'personal';
 export type InsightStatus = 'steady' | 'notice' | 'combined' | 'insufficient';
+
+export type TimelineEventType = 'checkin' | 'activity_summary' | 'late_night_window' | 'rest_rhythm';
+
+export interface TimelineEvent {
+  id: string;
+  type: TimelineEventType;
+  title: string;
+  description: string;
+  minuteOfDay: number | null; // 0 - 1439, or null if daily aggregate
+  timeLabel: string;
+  hasExactTimestamp: boolean;
+  ratings?: {
+    mood: number;
+    stress: number;
+    energy: number;
+    fatigue: number;
+  };
+  metrics?: {
+    screenTime?: number;
+    activeWork?: number;
+    breaks?: number;
+    lateNight?: number;
+    tasks?: number;
+  };
+  note?: string;
+  source: SourceKind;
+}
+
+export interface DayComparisonMetric {
+  label: string;
+  dayAValue: string | number;
+  dayBValue: string | number;
+  delta?: string | number;
+  unit?: string;
+}
+
+export interface ArchetypeSummary {
+  cluster_id: number;
+  archetype_name: string;
+  description: string;
+  distance_to_center: number;
+  is_routine_drift: boolean;
+  cluster_benchmark_averages: Record<string, number>;
+}
+
+export interface RoutineSimulationResponse {
+  predicted_productivity_score: number;
+  delta_from_reference: number;
+  contributing_factors: string[];
+  confidence_band: {
+    lower: number;
+    upper: number;
+  };
+  archetype: ArchetypeSummary;
+}
 
 export interface MoodCheckIn {
   id: string;

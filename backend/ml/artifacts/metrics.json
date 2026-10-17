@@ -1,0 +1,111 @@
+{
+  "dataset_rows": 250,
+  "dataset_cols": 13,
+  "features": [
+    "Total_Screen_Time_Hrs",
+    "Active_Work_Hrs",
+    "Social_Media_Hrs",
+    "Entertainment_Hrs",
+    "Late_Night_Usage_Hrs",
+    "Break_Count",
+    "Avg_Break_Duration_Mins",
+    "Age_Group",
+    "Occupation"
+  ],
+  "numerical_features": [
+    "Total_Screen_Time_Hrs",
+    "Active_Work_Hrs",
+    "Social_Media_Hrs",
+    "Entertainment_Hrs",
+    "Late_Night_Usage_Hrs",
+    "Break_Count",
+    "Avg_Break_Duration_Mins"
+  ],
+  "categorical_features": [
+    "Age_Group",
+    "Occupation"
+  ],
+  "test_size": 0.2,
+  "test_samples": 50,
+  "models": {
+    "dummy_baseline": {
+      "mae": 13.75,
+      "rmse": 16.95,
+      "r2": -0.0057
+    },
+    "ridge_regression": {
+      "mae": 8.84,
+      "rmse": 10.87,
+      "r2": 0.5867
+    },
+    "random_forest": {
+      "mae": 9.45,
+      "rmse": 11.65,
+      "r2": 0.5251
+    }
+  },
+  "selected_model": "Ridge",
+  "selected_metrics": {
+    "mae": 8.84,
+    "rmse": 10.87,
+    "r2": 0.5867
+  },
+  "habit_clusters": {
+    "0": {
+      "name": "High-Focus & Rest-Balanced",
+      "description": "Characterized by solid active study/work hours with consistent breaks.",
+      "averages": {
+        "Total_Screen_Time_Hrs": 9.76,
+        "Active_Work_Hrs": 6.53,
+        "Social_Media_Hrs": 1.79,
+        "Entertainment_Hrs": 1.43,
+        "Late_Night_Usage_Hrs": 0.77,
+        "Break_Count": 6.56,
+        "Avg_Break_Duration_Mins": 20.15,
+        "Productivity_Score_100": 81.78
+      }
+    },
+    "1": {
+      "name": "Moderate & Sustainable Routine",
+      "description": "Paced daily activity within standard baseline boundaries.",
+      "averages": {
+        "Total_Screen_Time_Hrs": 5.53,
+        "Active_Work_Hrs": 3.5,
+        "Social_Media_Hrs": 1.06,
+        "Entertainment_Hrs": 0.97,
+        "Late_Night_Usage_Hrs": 0.77,
+        "Break_Count": 6.05,
+        "Avg_Break_Duration_Mins": 17.15,
+        "Productivity_Score_100": 60.03
+      }
+    },
+    "2": {
+      "name": "High Entertainment & Distraction Drift",
+      "description": "Higher proportion of screen time allocated to leisure and social media.",
+      "averages": {
+        "Total_Screen_Time_Hrs": 8.28,
+        "Active_Work_Hrs": 4.55,
+        "Social_Media_Hrs": 1.7,
+        "Entertainment_Hrs": 2.03,
+        "Late_Night_Usage_Hrs": 1.06,
+        "Break_Count": 5.54,
+        "Avg_Break_Duration_Mins": 13.27,
+        "Productivity_Score_100": 67.36
+      }
+    },
+    "3": {
+      "name": "Late-Night Crunch & Fatigue Risk",
+      "description": "Characterized by elevated late-night hours and reduced rest intervals.",
+      "averages": {
+        "Total_Screen_Time_Hrs": 6.45,
+        "Active_Work_Hrs": 3.93,
+        "Social_Media_Hrs": 1.21,
+        "Entertainment_Hrs": 1.31,
+        "Late_Night_Usage_Hrs": 3.61,
+        "Break_Count": 5.61,
+        "Avg_Break_Duration_Mins": 17.61,
+        "Productivity_Score_100": 47.66
+      }
+    }
+  }
+}
