@@ -4,7 +4,11 @@ import type {
   DataMode,
   DailyActivity,
   MoodCheckIn,
+  RecommendationFeedback,
+  StressContributor,
   ThemePreference,
+  WellnessGoals,
+  WorkspaceWellnessGoals,
 } from '../types';
 
 export const STORAGE_KEY = 'mindtrace.app-data.v2';
@@ -59,6 +63,9 @@ function isMoodCheckIn(value: unknown): value is MoodCheckIn {
     && isRating(item.stress)
     && isRating(item.energy)
     && isRating(item.fatigue)
+    && isOptionalNumber(item.sleepHours, 24)
+    && (item.productivity === undefined || isRating(item.productivity))
+    && (item.stressContributor === undefined || isStressContributor(item.stressContributor))
     && typeof (item.note ?? '') === 'string'
     && (item.source === 'demo' || item.source === 'user');
 }
@@ -103,6 +110,66 @@ function isProfileName(value: unknown): value is string {
   return typeof value === 'string' && value.length <= 40;
 }
 
+function isStressContributor(value: unknown): value is StressContributor {
+  return value === 'workload' || value === 'deadlines' || value === 'sleep'
+    || value === 'digital-overload' || value === 'personal' || value === 'other';
+}
+
+function isWellnessGoals(value: unknown): value is WellnessGoals {
+  if (typeof value !== 'object' || value === null) return false;
+  const goals = value as Partial<WellnessGoals>;
+  return (goals.dailyScreenTimeHours === null
+      || (typeof goals.dailyScreenTimeHours === 'number'
+        && Number.isFinite(goals.dailyScreenTimeHours)
+        && goals.dailyScreenTimeHours >= 0
+        && goals.dailyScreenTimeHours <= 24))
+    && (goals.dailyBreaks === null
+      || (typeof goals.dailyBreaks === 'number'
+        && Number.isInteger(goals.dailyBreaks)
+        && goals.dailyBreaks >= 0
+        && goals.dailyBreaks <= 100));
+}
+
+function isWorkspaceWellnessGoals(value: unknown): value is WorkspaceWellnessGoals {
+  if (typeof value !== 'object' || value === null) return false;
+  const goals = value as Partial<WorkspaceWellnessGoals>;
+  return isWellnessGoals(goals.demo) && isWellnessGoals(goals.personal);
+}
+
+function isRecommendationFeedback(value: unknown): value is Record<string, RecommendationFeedback> {
+  return typeof value === 'object' && value !== null
+    && Object.entries(value).every(([id, feedback]) => id.length > 0
+      && (feedback === 'helpful' || feedback === 'dismissed'));
+}
+
+const emptyWellnessGoals: WellnessGoals = {
+  dailyScreenTimeHours: null,
+  dailyBreaks: null,
+};
+
+const defaultWellnessGoals: WorkspaceWellnessGoals = {
+  demo: { ...emptyWellnessGoals },
+  personal: { ...emptyWellnessGoals },
+};
+
+function readOptionalPreferences(value: Partial<AppData['preferences']>) {
+  const legacyGoals = isWellnessGoals(value.wellnessGoals) ? value.wellnessGoals : null;
+  return {
+    profileName: isProfileName(value.profileName) ? value.profileName : '',
+    wellnessGoals: isWorkspaceWellnessGoals(value.wellnessGoals)
+      ? value.wellnessGoals
+      : legacyGoals
+        ? {
+            ...defaultWellnessGoals,
+            [value.dataMode === 'demo' ? 'demo' : 'personal']: legacyGoals,
+          }
+        : defaultWellnessGoals,
+    recommendationFeedback: isRecommendationFeedback(value.recommendationFeedback)
+      ? value.recommendationFeedback
+      : {},
+  };
+}
+
 function fromLegacyStorage(storage: Storage): { data: AppData | null; warning: string | null } {
   const rawMood = storage.getItem(LEGACY_MOOD_KEY);
   const rawActivity = storage.getItem(LEGACY_ACTIVITY_KEY);
@@ -126,7 +193,11 @@ function fromLegacyStorage(storage: Storage): { data: AppData | null; warning: s
       data: {
         moodCheckIns: [...demoMoodCheckIns, ...personalMoods],
         activityEntries: [...demoActivityEntries, ...personalActivities],
-        preferences: { theme: isTheme(rawTheme) ? rawTheme : defaultTheme(), dataMode, profileName: '' },
+        preferences: {
+          theme: isTheme(rawTheme) ? rawTheme : defaultTheme(),
+          dataMode,
+          ...readOptionalPreferences({}),
+        },
       },
       warning: null,
     };
@@ -143,7 +214,11 @@ export function loadAppData(): LoadedAppData {
   const fallback: AppData = {
     moodCheckIns: demoMoodCheckIns,
     activityEntries: demoActivityEntries,
-    preferences: { theme: defaultTheme(), dataMode: 'demo', profileName: '' },
+    preferences: {
+      theme: defaultTheme(),
+      dataMode: 'demo',
+      ...readOptionalPreferences({}),
+    },
   };
 
   if (!storage) {
@@ -167,7 +242,12 @@ export function loadAppData(): LoadedAppData {
       || !Array.isArray(saved.activityEntries) || !saved.activityEntries.every(isDailyActivity)
       || typeof saved.preferences !== 'object' || saved.preferences === null
       || !isTheme(saved.preferences.theme)
-      || (saved.preferences.profileName !== undefined && !isProfileName(saved.preferences.profileName))) {
+      || (saved.preferences.profileName !== undefined && !isProfileName(saved.preferences.profileName))
+      || (saved.preferences.wellnessGoals !== undefined
+        && !isWellnessGoals(saved.preferences.wellnessGoals)
+        && !isWorkspaceWellnessGoals(saved.preferences.wellnessGoals))
+      || (saved.preferences.recommendationFeedback !== undefined
+        && !isRecommendationFeedback(saved.preferences.recommendationFeedback))) {
       throw new Error('Saved data did not pass validation.');
     }
     const hasPersonalRecords = saved.moodCheckIns.some((item) => item.source === 'user')
@@ -184,7 +264,7 @@ export function loadAppData(): LoadedAppData {
           dataMode: isDataMode(saved.preferences.dataMode)
             ? saved.preferences.dataMode
             : hasPersonalRecords ? 'personal' : 'demo',
-          profileName: isProfileName(saved.preferences.profileName) ? saved.preferences.profileName : '',
+          ...readOptionalPreferences(saved.preferences),
         },
       },
       warning: null,
@@ -214,7 +294,11 @@ export function restoreDemoData(): AppData {
   return {
     moodCheckIns: demoMoodCheckIns.map((item) => ({ ...item })),
     activityEntries: demoActivityEntries.map((item) => ({ ...item })),
-    preferences: { theme: defaultTheme(), dataMode: 'demo', profileName: '' },
+    preferences: {
+      theme: defaultTheme(),
+      dataMode: 'demo',
+      ...readOptionalPreferences({}),
+    },
   };
 }
 

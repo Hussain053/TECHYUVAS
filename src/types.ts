@@ -4,6 +4,8 @@ export type AppPage =
   | 'activity'
   | 'insights'
   | 'recommendations'
+  | 'weekly'
+  | 'goals'
   | 'history'
   | 'settings'
   | 'demo'
@@ -14,6 +16,21 @@ export type SourceKind = 'demo' | 'user';
 export type ThemePreference = 'light' | 'dark';
 export type DataMode = 'demo' | 'personal';
 export type InsightStatus = 'steady' | 'notice' | 'combined' | 'insufficient';
+export type RecommendationFeedback = 'helpful' | 'dismissed';
+export type StressContributor =
+  | 'workload'
+  | 'deadlines'
+  | 'sleep'
+  | 'digital-overload'
+  | 'personal'
+  | 'other';
+
+export interface WellnessGoals {
+  dailyScreenTimeHours: number | null;
+  dailyBreaks: number | null;
+}
+
+export type WorkspaceWellnessGoals = Record<DataMode, WellnessGoals>;
 
 export type TimelineEventType = 'checkin' | 'activity_summary' | 'late_night_window' | 'rest_rhythm';
 
@@ -78,6 +95,9 @@ export interface MoodCheckIn {
   stress: number;
   energy: number;
   fatigue: number;
+  sleepHours?: number;
+  productivity?: number;
+  stressContributor?: StressContributor;
   note: string;
   source: SourceKind;
 }
@@ -132,6 +152,8 @@ export interface UserPreferences {
   theme: ThemePreference;
   dataMode: DataMode;
   profileName: string;
+  wellnessGoals: WorkspaceWellnessGoals;
+  recommendationFeedback: Record<string, RecommendationFeedback>;
 }
 
 export interface AppData {
