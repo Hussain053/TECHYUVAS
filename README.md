@@ -1,32 +1,31 @@
-# React + TypeScript + Vite
+# MindTrace AI
 
-This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
+**AI Stress Pattern Analyzer from Digital Behavior**
 
-Currently, two official plugins are available:
+## Problem Statement (PS)
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Oxc](https://oxc.rs)
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/)
+To analyze digital behavior patterns and self-reported mood to identify potential stress-related changes and provide personalized wellness recommendations.
 
-## React Compiler
+## Team Name
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+**TECHYUVAS**
 
-## Expanding the Oxlint configuration
+## Project Overview
 
-If you are developing a production application, we recommend enabling type-aware lint rules by installing `oxlint-tsgolint` and editing `.oxlintrc.json`:
+MindTrace AI is a wellness-support application designed to help users understand their digital habits and changes in their daily well-being.
 
-```json
-{
-  "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["react", "typescript", "oxc"],
-  "options": {
-    "typeAware": true
-  },
-  "rules": {
-    "react/rules-of-hooks": "error",
-    "react/only-export-components": ["warn", { "allowConstantExport": true }]
-  }
-}
-```
+It analyzes activity patterns such as screen time, late-night usage, and breaks alongside self-reported mood, stress, energy, and fatigue levels.
 
-See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+The goal is to help users recognize behavioral changes and make informed decisions about their digital routines.
+
+## Key Features
+
+- Daily mood and stress check-ins.
+- Digital activity logging.
+- Screen-time and mood trend visualization.
+- Personal baseline comparison.
+- Explainable behavioral insights.
+- Personalized wellness recommendations.
+- Privacy-conscious data handling.
+
+
