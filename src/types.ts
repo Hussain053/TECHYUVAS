@@ -7,9 +7,9 @@ export type AppPage =
   | 'weekly'
   | 'goals'
   | 'history'
+  | 'simulator'
   | 'settings'
   | 'demo'
-  | 'simulator'
   | 'doppelganger';
 
 export type SourceKind = 'demo' | 'user';

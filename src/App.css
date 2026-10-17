@@ -98,7 +98,7 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
 .brand-lockup small { display: block; padding-top: 4px; color: #98aeba; font-size: 8px; font-weight: 700; letter-spacing: 1.3px; }
 .mobile-close { display: none !important; margin-left: auto; }
 .sidebar-label { padding: 0 11px 11px; color: #8da4b2; font-size: 9px; font-weight: 700; letter-spacing: 1.25px; }
-.primary-nav { display: grid; min-height: 0; gap: 4px; overflow-y: auto; }
+.primary-nav { display: grid; min-height: 0; gap: 4px; overflow: visible; }
 .nav-link {
   position: relative; display: flex; align-items: center; gap: 12px; min-height: 43px; width: 100%;
   padding: 0 12px; border: 0; border-radius: 9px; color: #c4d0d7; background: transparent;
@@ -442,6 +442,37 @@ button:focus-visible, input:focus-visible, textarea:focus-visible, a:focus-visib
   .metric-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .two-column-layout, .activity-layout { grid-template-columns: minmax(0, 1fr); }
   .list-panel { max-height: 670px; overflow: auto; }
+}
+
+@media (max-height: 860px) {
+  .sidebar { padding: 14px 12px 10px; }
+  .brand-lockup { padding-bottom: 14px; }
+  .sidebar-label { padding-bottom: 5px; }
+  .primary-nav { gap: 2px; }
+  .nav-link { min-height: 32px; padding-right: 10px; padding-left: 10px; font-size: 11px; }
+  .sidebar-bottom { flex: 0 0 auto; }
+  .local-status { margin: 0 4px 4px; padding: 7px 8px; }
+  .sidebar-theme { padding-top: 7px; padding-bottom: 7px; }
+  .sidebar-profile { margin-top: 5px; padding-top: 6px; }
+  .sidebar-profile-mark { width: 26px; height: 26px; }
+}
+
+@media (max-height: 660px) {
+  .sidebar { padding: 10px 10px 7px; }
+  .brand-mark { width: 30px; height: 30px; }
+  .brand-lockup { padding: 0 8px 7px; }
+  .brand-lockup strong { font-size: 16px; }
+  .brand-lockup small { padding-top: 2px; font-size: 7px; }
+  .sidebar-label { padding-bottom: 4px; font-size: 8px; }
+  .primary-nav { gap: 1px; }
+  .nav-link { min-height: 27px; gap: 9px; padding-right: 8px; padding-left: 8px; font-size: 10px; }
+  .nav-link svg { width: 15px; height: 15px; }
+  .local-status { padding: 5px 7px; }
+  .local-status strong { font-size: 10px; }
+  .local-status small { margin-top: 1px; font-size: 9px; }
+  .sidebar-theme { gap: 7px; padding: 5px 8px; font-size: 10px; }
+  .sidebar-profile { margin-top: 3px; padding-top: 4px; }
+  .sidebar-profile-mark { width: 23px; height: 23px; }
 }
 
 @media (max-width: 760px) {

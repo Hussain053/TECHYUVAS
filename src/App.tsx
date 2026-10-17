@@ -12,27 +12,27 @@ import {
   Clock3,
   Compass,
   Download,
+  Eye,
   Heart,
+  Layers,
   LayoutDashboard,
   Menu,
   Moon,
+  Pause,
+  Play,
   Plus,
   Printer,
+  RotateCcw,
   ShieldCheck,
   SlidersHorizontal,
   Sparkles,
+  Split,
   Sun,
   Target,
   TrendingUp,
   ThumbsUp,
   X,
   AlertTriangle,
-  Play,
-  Pause,
-  RotateCcw,
-  Layers,
-  Eye,
-  Split,
 } from 'lucide-react';
 import { simulateRoutineApi, profileHabitApi } from './lib/api';
 import { buildDayEvents, compareTwoDays, minuteToTimeString } from './lib/timeline';
@@ -79,8 +79,6 @@ import type {
 
 const navItems: Array<{ id: AppPage; label: string; icon: typeof LayoutDashboard }> = [
   { id: 'overview', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'doppelganger', label: 'Behaviour replay', icon: Play },
-  { id: 'simulator', label: 'Routine simulator', icon: SlidersHorizontal },
   { id: 'checkin', label: 'Daily check-in', icon: Heart },
   { id: 'activity', label: 'Activity tracking', icon: Activity },
   { id: 'insights', label: 'Behavior patterns', icon: Brain },
@@ -88,6 +86,8 @@ const navItems: Array<{ id: AppPage; label: string; icon: typeof LayoutDashboard
   { id: 'weekly', label: 'Weekly report', icon: CalendarDays },
   { id: 'goals', label: 'My goals', icon: Target },
   { id: 'history', label: 'History & trends', icon: BarChart3 },
+  { id: 'simulator', label: 'Routine simulator', icon: SlidersHorizontal },
+  { id: 'doppelganger', label: 'Behaviour replay', icon: Play },
   { id: 'settings', label: 'Privacy & data', icon: ShieldCheck },
   { id: 'demo', label: 'Interactive demo', icon: Compass },
 ];
@@ -97,14 +97,7 @@ const pageCopy: Record<AppPage, { title: string; description: string }> = {
     title: 'Your patterns, at a glance',
     description: 'Understand your digital habits. Recognize stress patterns. Build healthier routines.',
   },
-  doppelganger: {
-    title: 'Digital Doppelgänger — Your Behaviour, Replayed',
-    description: 'Reconstruct and replay your recorded digital habits and self-reported check-ins across a 24-hour timeline.',
-  },
-  simulator: {
-    title: 'What-if routine simulator',
-    description: 'Adjust your daily digital routine and forecast predicted productivity scores and habit archetypes using machine learning.',
-  },
+
   checkin: {
     title: 'Make space to check in',
     description: 'A quick, private reflection. Add another check-in whenever it feels useful.',
@@ -132,6 +125,14 @@ const pageCopy: Record<AppPage, { title: string; description: string }> = {
   history: {
     title: 'Your history',
     description: 'See mood check-ins and activity together, day by day.',
+  },
+  simulator: {
+    title: 'What-if routine simulator',
+    description: 'Explore how changes to digital habits relate to the model’s productivity estimate and habit profile.',
+  },
+  doppelganger: {
+    title: 'Digital Doppelgänger — Your Behaviour, Replayed',
+    description: 'Explore recorded activity and self-reported check-ins on a 24-hour timeline, or compare two recorded days.',
   },
   settings: {
     title: 'Your privacy & data',
@@ -603,6 +604,7 @@ function App() {
 
   const navigate = (page: AppPage) => {
     setActivePage(page);
+    if (page !== 'doppelganger') setIsPlaying(false);
     setMobileMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
@@ -612,6 +614,7 @@ function App() {
   };
 
   const setDataMode = (dataMode: DataMode) => {
+    setIsPlaying(false);
     setGoalDraft({
       dailyScreenTimeHours: data.preferences.wellnessGoals[dataMode].dailyScreenTimeHours?.toString() ?? '',
       dailyBreaks: data.preferences.wellnessGoals[dataMode].dailyBreaks?.toString() ?? '',
