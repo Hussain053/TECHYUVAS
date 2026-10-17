@@ -233,6 +233,13 @@ The following items are planned work and are **not part of the current implement
 5. **Further quality assurance** for account flows, data access boundaries, mobile layouts, and error handling.
 6. **Model integration only if justified** by consented data, a validated approach, explainability, and appropriate safety review. Until then, retain transparent deterministic analysis.
 
+##What makes MindTrace useful?
+“Beyond the dashboard, we have added features like weekly wellness reports, personal habit goals, and recommendation feedback.
+
+Users can compare their recent routines with their own historical baseline, understand the evidence behind each observation, and choose practical steps according to their needs.
+
+Aur sabse important, demo aur personal workspaces separate hain, so sample data doesn't mix with personal records.”
+
 ## Team
 
 **Team:** TECHYUVAS
