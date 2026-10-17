@@ -1,4 +1,4 @@
-import type { DailyActivity, MoodCheckIn } from '../types';
+import type { DailyActivity, MoodCheckIn, StressContributor } from '../types';
 import { localDateKey } from './analysis';
 
 export interface ReportWindow {
@@ -12,6 +12,9 @@ export interface ReportWindow {
   averageStress: number | null;
   averageEnergy: number | null;
   averageFatigue: number | null;
+  averageSleepHours: number | null;
+  averageProductivity: number | null;
+  leadingStressContributor: { contributor: StressContributor; count: number } | null;
   highestStressDay: { date: string; rating: number } | null;
   lowestStressDay: { date: string; rating: number } | null;
 }
@@ -58,6 +61,14 @@ function getWindow(
   const stressDays = dailyRatings
     .filter((item): item is typeof item & { stress: number } => item.stress !== null)
     .sort((first, second) => first.stress - second.stress);
+  const contributorCounts = new Map<StressContributor, number>();
+  for (const entry of checkIns.filter((item) => inWindow(item.date))) {
+    if (entry.stressContributor) {
+      contributorCounts.set(entry.stressContributor, (contributorCounts.get(entry.stressContributor) ?? 0) + 1);
+    }
+  }
+  const leadingStressContributor = [...contributorCounts.entries()]
+    .sort((first, second) => second[1] - first[1])[0];
 
   return {
     start: startKey,
@@ -76,6 +87,17 @@ function getWindow(
       .filter((value): value is number => value !== null)),
     averageFatigue: average(dailyRatings.map((item) => item.fatigue)
       .filter((value): value is number => value !== null)),
+    averageSleepHours: average([...checkInsByDate.values()]
+      .map((entries) => average(entries.map((entry) => entry.sleepHours)
+        .filter((value): value is number => value !== undefined)))
+      .filter((value): value is number => value !== null)),
+    averageProductivity: average(dailyRatings.map((item) => average(
+      checkInsByDate.get(item.date)?.map((entry) => entry.productivity)
+        .filter((value): value is number => value !== undefined) ?? [],
+    )).filter((value): value is number => value !== null)),
+    leadingStressContributor: leadingStressContributor
+      ? { contributor: leadingStressContributor[0], count: leadingStressContributor[1] }
+      : null,
     highestStressDay: stressDays.length
       ? { date: stressDays.at(-1)!.date, rating: stressDays.at(-1)!.stress }
       : null,

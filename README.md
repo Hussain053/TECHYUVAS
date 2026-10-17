@@ -70,8 +70,9 @@ The interface emphasizes self-awareness, user choice, and understandable explana
 
 ### Additional reflection tools
 
-- **Weekly Wellness Report:** summarizes the last seven days of activity and self-reported ratings, compares available averages with the previous seven days, highlights the highest and lowest recorded stress-rating days, and surfaces up to three suggestions from the existing rule-based recommendation logic. It is descriptive, not a clinical assessment.
-- **Personal habit goals:** users can optionally set their own screen-time and daily-break targets. Progress uses only days with corresponding activity records; missing days are not counted as missed goals. No default target is imposed.
+- **Weekly Wellness Report:** summarizes the last seven days of activity and self-reported ratings, compares available averages with the previous seven days, includes optional sleep, perceived productivity, and reported stress contributors, highlights the highest and lowest recorded stress-rating days, and surfaces up to three suggestions from the existing rule-based recommendation logic. The report can be printed or saved as a PDF from the browser. It is descriptive, not a clinical assessment.
+- **Personal habit goals:** users can optionally set their own screen-time and daily-break targets. Goals are saved separately for the Demo and Personal workspaces. The Goals page shows recent observed averages and attainment only for days with corresponding records, offers to prefill a target from the recent average, and does not count missing days as missed goals. No default target is imposed.
+- **Richer daily reflection:** check-ins may optionally record sleep duration, perceived productivity, and the main reported stress contributor. These fields are contextual reflection data; they do not change the existing baseline thresholds or imply causation.
 - **Recommendation feedback:** users can mark an existing suggestion helpful or dismiss it. Feedback is saved locally per workspace, and dismissed suggestions can be restored. Feedback does not alter the analysis or create new recommendations.
 
 ### Workspace and interface controls

@@ -16,6 +16,7 @@ import {
   Menu,
   Moon,
   Plus,
+  Printer,
   ShieldCheck,
   Sun,
   Target,
@@ -56,6 +57,7 @@ import type {
   DailyActivity,
   MoodCheckIn,
   RecommendationFeedback,
+  StressContributor,
   ThemePreference,
   WellnessGoals,
 } from './types';
@@ -122,6 +124,9 @@ type MoodForm = {
   stress: number;
   energy: number;
   fatigue: number;
+  sleepHours: string;
+  productivity: number | null;
+  stressContributor: StressContributor | '';
   note: string;
   editingId: string | null;
 };
@@ -155,7 +160,31 @@ function toLocalDateTimeInput(date = new Date()): string {
 }
 
 function newMoodForm(): MoodForm {
-  return { recordedAt: toLocalDateTimeInput(), mood: 3, stress: 3, energy: 3, fatigue: 3, note: '', editingId: null };
+  return {
+    recordedAt: toLocalDateTimeInput(),
+    mood: 3,
+    stress: 3,
+    energy: 3,
+    fatigue: 3,
+    sleepHours: '',
+    productivity: null,
+    stressContributor: '',
+    note: '',
+    editingId: null,
+  };
+}
+
+const stressContributorLabels: Record<StressContributor, string> = {
+  workload: 'Workload',
+  deadlines: 'Deadlines',
+  sleep: 'Sleep or rest',
+  'digital-overload': 'Digital overload',
+  personal: 'Personal circumstances',
+  other: 'Something else',
+};
+
+function isStressContributor(value: string): value is StressContributor {
+  return Object.hasOwn(stressContributorLabels, value);
 }
 
 function newActivityForm(): ActivityForm {
@@ -340,8 +369,8 @@ function App() {
   const [profileNameDraft, setProfileNameDraft] = useState(initial.data.preferences.profileName);
   const [profileNameError, setProfileNameError] = useState('');
   const [goalDraft, setGoalDraft] = useState({
-    dailyScreenTimeHours: initial.data.preferences.wellnessGoals.dailyScreenTimeHours?.toString() ?? '',
-    dailyBreaks: initial.data.preferences.wellnessGoals.dailyBreaks?.toString() ?? '',
+    dailyScreenTimeHours: initial.data.preferences.wellnessGoals[initial.data.preferences.dataMode].dailyScreenTimeHours?.toString() ?? '',
+    dailyBreaks: initial.data.preferences.wellnessGoals[initial.data.preferences.dataMode].dailyBreaks?.toString() ?? '',
   });
   const [goalError, setGoalError] = useState('');
   const today = localDateKey();
@@ -417,6 +446,10 @@ function App() {
   };
 
   const setDataMode = (dataMode: DataMode) => {
+    setGoalDraft({
+      dailyScreenTimeHours: data.preferences.wellnessGoals[dataMode].dailyScreenTimeHours?.toString() ?? '',
+      dailyBreaks: data.preferences.wellnessGoals[dataMode].dailyBreaks?.toString() ?? '',
+    });
     updateData((previous) => ({
       ...previous,
       preferences: { ...previous.preferences, dataMode },
@@ -454,14 +487,20 @@ function App() {
       setGoalError('Break goal must be a whole number from 0 to 100.');
       return;
     }
-    const wellnessGoals: WellnessGoals = {
+    const wellnessGoalsForWorkspace: WellnessGoals = {
       dailyScreenTimeHours: screenGoal,
       dailyBreaks: breakGoal,
     };
     setGoalError('');
     updateData((previous) => ({
       ...previous,
-      preferences: { ...previous.preferences, wellnessGoals },
+      preferences: {
+        ...previous.preferences,
+        wellnessGoals: {
+          ...previous.preferences.wellnessGoals,
+          [previous.preferences.dataMode]: wellnessGoalsForWorkspace,
+        },
+      },
     }));
   };
 
@@ -489,6 +528,10 @@ function App() {
       errors.recordedAt = 'Choose a valid date and time.';
     }
     if (date.getTime() > Date.now() + 60_000) errors.recordedAt = 'A check-in cannot be in the future.';
+    const sleepHours = moodForm.sleepHours.trim() === '' ? undefined : Number(moodForm.sleepHours);
+    if (sleepHours !== undefined && (!Number.isFinite(sleepHours) || sleepHours < 0 || sleepHours > 24)) {
+      errors.sleepHours = 'Enter sleep from 0 to 24 hours, or leave it blank.';
+    }
     setMoodErrors(errors);
     if (Object.keys(errors).length) return;
 
@@ -500,6 +543,9 @@ function App() {
       stress: moodForm.stress,
       energy: moodForm.energy,
       fatigue: moodForm.fatigue,
+      ...(sleepHours === undefined ? {} : { sleepHours }),
+      ...(moodForm.productivity === null ? {} : { productivity: moodForm.productivity }),
+      ...(moodForm.stressContributor ? { stressContributor: moodForm.stressContributor } : {}),
       note: moodForm.note.trim(),
       source: 'user',
     };
@@ -587,6 +633,9 @@ function App() {
       stress: entry.stress,
       energy: entry.energy,
       fatigue: entry.fatigue,
+      sleepHours: entry.sleepHours === undefined ? '' : String(entry.sleepHours),
+      productivity: entry.productivity ?? null,
+      stressContributor: entry.stressContributor ?? '',
       note: entry.note,
       editingId: entry.id,
     });
@@ -925,6 +974,50 @@ function App() {
               <RatingScale label="Stress" hint="Higher means more self-reported stress." value={moodForm.stress} onChange={(stress) => setMoodForm((previous) => ({ ...previous, stress }))} low="Very calm" high="Very high" />
               <RatingScale label="Energy" hint="How much energy do you have?" value={moodForm.energy} onChange={(energy) => setMoodForm((previous) => ({ ...previous, energy }))} low="Very low" high="Very high" />
               <RatingScale label="Fatigue" hint="Higher means more self-reported fatigue." value={moodForm.fatigue} onChange={(fatigue) => setMoodForm((previous) => ({ ...previous, fatigue }))} low="Well rested" high="Very tired" />
+            </div>
+            <div className="form-grid checkin-context-grid">
+              <label className="field">
+                <span>Sleep last night <small>(optional)</small></span>
+                <div className="input-with-unit">
+                  <input type="number" min="0" max="24" step="0.5" inputMode="decimal"
+                    value={moodForm.sleepHours}
+                    aria-invalid={Boolean(moodErrors.sleepHours)}
+                    onChange={(event) => {
+                      setMoodForm((previous) => ({ ...previous, sleepHours: event.target.value }));
+                      setMoodErrors((previous) => ({ ...previous, sleepHours: '' }));
+                    }} />
+                  <span>hours</span>
+                </div>
+                {moodErrors.sleepHours && <span className="field-error">{moodErrors.sleepHours}</span>}
+              </label>
+              <label className="field">
+                <span>Perceived productivity <small>(optional)</small></span>
+                <select value={moodForm.productivity ?? ''}
+                  onChange={(event) => setMoodForm((previous) => ({
+                    ...previous,
+                    productivity: event.target.value === '' ? null : Number(event.target.value),
+                  }))}>
+                  <option value="">Skip</option>
+                  <option value="1">1 — Very low</option>
+                  <option value="2">2 — Low</option>
+                  <option value="3">3 — Moderate</option>
+                  <option value="4">4 — Good</option>
+                  <option value="5">5 — Very good</option>
+                </select>
+              </label>
+              <label className="field">
+                <span>What contributed most to stress? <small>(optional)</small></span>
+                <select value={moodForm.stressContributor}
+                  onChange={(event) => setMoodForm((previous) => ({
+                    ...previous,
+                    stressContributor: isStressContributor(event.target.value) ? event.target.value : '',
+                  }))}>
+                  <option value="">Prefer not to say</option>
+                  {Object.entries(stressContributorLabels).map(([value, label]) => (
+                    <option key={value} value={value}>{label}</option>
+                  ))}
+                </select>
+              </label>
             </div>
             <label className="field">
               <span>Optional note</span>
@@ -1293,6 +1386,9 @@ function App() {
         <div className="weekly-range-note">
           <CalendarDays size={16} />
           <span>Current week: {formatDate(current.start)}–{formatDate(current.end)} · Compared with {formatDate(previous.start)}–{formatDate(previous.end)}</span>
+          <button className="button button-quiet weekly-print-button" type="button" onClick={() => window.print()}>
+            <Printer size={15} /> Print / save PDF
+          </button>
         </div>
         <div className="metric-grid weekly-metric-grid">
           <MetricCard label="Average screen time" value={formatAverage(current.averageScreenTime, 'h/day')}
@@ -1311,6 +1407,11 @@ function App() {
               <div><span>Check-in days recorded</span><strong>{current.checkInDays} of 7</strong></div>
               <div><span>Average breaks on recorded days</span><strong>{formatAverage(current.averageBreaks, ' / day')}</strong></div>
               <div><span>Average mood</span><strong>{formatAverage(current.averageMood, ' / 5')}</strong></div>
+              <div><span>Average reported sleep duration</span><strong>{formatAverage(current.averageSleepHours, ' h/night')}</strong></div>
+              <div><span>Average reported productivity</span><strong>{formatAverage(current.averageProductivity, ' / 5')}</strong></div>
+              <div><span>Most selected stress contributor</span><strong>{current.leadingStressContributor
+                ? `${stressContributorLabels[current.leadingStressContributor.contributor]} · selected in ${current.leadingStressContributor.count} check-ins`
+                : 'Not reported'}</strong></div>
             </div>
             {current.highestStressDay && (
               <p className="weekly-context-note">
@@ -1350,8 +1451,14 @@ function App() {
       .map((entry) => [entry.date, entry]));
     const recentEntries = [...recentEntriesByDate.values()];
     const entriesWithBreaks = recentEntries.filter((entry) => entry.breaks !== undefined);
-    const screenGoal = data.preferences.wellnessGoals.dailyScreenTimeHours;
-    const breakGoal = data.preferences.wellnessGoals.dailyBreaks;
+    const screenGoal = data.preferences.wellnessGoals[data.preferences.dataMode].dailyScreenTimeHours;
+    const breakGoal = data.preferences.wellnessGoals[data.preferences.dataMode].dailyBreaks;
+    const recentScreenAverage = recentEntries.length
+      ? recentEntries.reduce((sum, entry) => sum + entry.totalScreenTime, 0) / recentEntries.length
+      : null;
+    const recentBreakAverage = entriesWithBreaks.length
+      ? entriesWithBreaks.reduce((sum, entry) => sum + (entry.breaks ?? 0), 0) / entriesWithBreaks.length
+      : null;
     const screenGoalDays = screenGoal === null ? [] : recentEntries.filter((entry) => entry.totalScreenTime <= screenGoal);
     const breakGoalDays = breakGoal === null ? [] : entriesWithBreaks.filter((entry) => (entry.breaks ?? 0) >= breakGoal);
     const renderGoalProgress = (
@@ -1361,9 +1468,10 @@ function App() {
       recordedDays: number,
       unit: string,
       lowerIsBetter: boolean,
+      observedAverage: number | null,
     ) => {
       if (target === null) {
-        return <article className="goal-progress-card"><span className="eyebrow">{label}</span><strong className="goal-not-set">No goal set</strong><p>Choose a target that feels realistic for your routine.</p></article>;
+        return <article className="goal-progress-card"><span className="eyebrow">{label}</span><strong className="goal-not-set">No goal set</strong><p>{observedAverage === null ? 'Record activity to establish a recent reference.' : `Recent recorded average: ${observedAverage.toFixed(1)}${unit}. Choose a target that feels realistic for your routine.`}</p></article>;
       }
       const percentage = recordedDays ? Math.round((metDays / recordedDays) * 100) : 0;
       return (
@@ -1374,15 +1482,16 @@ function App() {
             aria-valuemin={0} aria-valuemax={100} aria-valuenow={percentage}>
             <span style={{ width: `${percentage}%` }} />
           </div>
-          <p>{recordedDays ? `${metDays} of ${recordedDays} recorded days met this goal` : 'No matching activity entries recorded this week yet.'}</p>
+          <p>{observedAverage === null ? 'No matching activity entries recorded this week yet.' : `Recent recorded average: ${observedAverage.toFixed(1)}${unit}. ${metDays} of ${recordedDays} recorded days met this goal.`}</p>
         </article>
       );
     };
     return (
       <>
         <PageHeading page="goals" />
-        <Panel eyebrow="Choose your own targets" title="Small, flexible goals">
+        <Panel eyebrow={data.preferences.dataMode === 'demo' ? 'Illustrative sample workspace' : 'Your personal workspace'} title="Small, flexible goals">
           <p className="panel-copy">Set goals that fit your life. MindTrace does not assume one ideal screen-time limit or break schedule. Leave a field blank to skip that goal.</p>
+          {data.preferences.dataMode === 'demo' && <p className="weekly-context-note">These targets and progress are kept separate from your Personal workspace. The sample records are illustrative, not your personal history.</p>}
           <form className="goal-settings-form" onSubmit={saveGoals}>
             <label className="field">
               <span>Daily screen-time goal</span>
@@ -1396,6 +1505,27 @@ function App() {
                 onChange={(event) => { setGoalDraft((previousState) => ({ ...previousState, dailyBreaks: event.target.value })); setGoalError(''); }} />
                 <span>breaks or blank</span></div>
             </label>
+            <div className="goal-calibration-actions">
+              <span>Use your last 7 recorded days as a starting point (screen time rounds to the nearest half hour):</span>
+              <button className="text-button" type="button" disabled={recentScreenAverage === null}
+                onClick={() => {
+                  if (recentScreenAverage === null) return;
+                  setGoalDraft((previousState) => ({
+                    ...previousState,
+                    dailyScreenTimeHours: (Math.round(recentScreenAverage * 2) / 2).toFixed(1),
+                  }));
+                  setGoalError('');
+                }}>Set screen-time target from average</button>
+              <button className="text-button" type="button" disabled={recentBreakAverage === null}
+                onClick={() => {
+                  if (recentBreakAverage === null) return;
+                  setGoalDraft((previousState) => ({
+                    ...previousState,
+                    dailyBreaks: String(Math.round(recentBreakAverage)),
+                  }));
+                  setGoalError('');
+                }}>Set break target from average</button>
+            </div>
             <div className="form-actions goal-form-actions">
               <button className="button button-primary" type="submit">Save my goals <Check size={15} /></button>
               {goalError && <span className="field-error" role="alert">{goalError}</span>}
@@ -1404,8 +1534,8 @@ function App() {
         </Panel>
         <Panel className="goal-progress-panel" eyebrow="Last 7 days" title="Progress from your recorded activity">
           <div className="goal-progress-grid">
-            {renderGoalProgress('Screen time', screenGoal, screenGoalDays.length, recentEntries.length, 'h/day', true)}
-            {renderGoalProgress('Breaks', breakGoal, breakGoalDays.length, entriesWithBreaks.length, ' / day', false)}
+            {renderGoalProgress('Screen time', screenGoal, screenGoalDays.length, recentEntries.length, 'h/day', true, recentScreenAverage)}
+            {renderGoalProgress('Breaks', breakGoal, breakGoalDays.length, entriesWithBreaks.length, ' / day', false, recentBreakAverage)}
           </div>
           <p className="weekly-context-note">Progress is calculated only from activity entries you recorded. Missing days are not counted as missed goals.</p>
         </Panel>
@@ -1596,6 +1726,7 @@ function App() {
         </Panel>
         <Panel eyebrow="Data location" title="Local to this browser">
           <div className="privacy-callout"><ShieldCheck size={18} /><p>Your records are stored in this browser’s local storage. This version does not sync to a server or send data to external analysis services.</p></div>
+          <p className="panel-copy">Check-ins can include your mood, stress, energy, and fatigue ratings, plus optional sleep duration, perceived productivity, stress contributor, and note. Only enter details you are comfortable keeping on this device.</p>
           <ul className="privacy-list"><li>Clearing browser site data may remove your entries.</li><li>Do not use a shared device for sensitive notes.</li><li>No device tracking or automatic collection is used.</li></ul>
         </Panel>
         <Panel eyebrow="Separate workspaces" title="Choose what you are viewing">
