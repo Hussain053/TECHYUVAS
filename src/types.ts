@@ -4,6 +4,8 @@ export type AppPage =
   | 'activity'
   | 'insights'
   | 'recommendations'
+  | 'weekly'
+  | 'goals'
   | 'history'
   | 'settings'
   | 'demo';
@@ -12,6 +14,12 @@ export type SourceKind = 'demo' | 'user';
 export type ThemePreference = 'light' | 'dark';
 export type DataMode = 'demo' | 'personal';
 export type InsightStatus = 'steady' | 'notice' | 'combined' | 'insufficient';
+export type RecommendationFeedback = 'helpful' | 'dismissed';
+
+export interface WellnessGoals {
+  dailyScreenTimeHours: number | null;
+  dailyBreaks: number | null;
+}
 
 export interface MoodCheckIn {
   id: string;
@@ -75,6 +83,8 @@ export interface UserPreferences {
   theme: ThemePreference;
   dataMode: DataMode;
   profileName: string;
+  wellnessGoals: WellnessGoals;
+  recommendationFeedback: Record<string, RecommendationFeedback>;
 }
 
 export interface AppData {

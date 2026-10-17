@@ -15,6 +15,7 @@ MindTrace is a privacy-conscious, self-guided web prototype that helps people re
 - [The challenge](#the-challenge)
 - [Product approach](#product-approach)
 - [Implemented capabilities](#implemented-capabilities)
+- [Additional reflection tools](#additional-reflection-tools)
 - [How pattern analysis works](#how-pattern-analysis-works)
 - [Technology stack and architecture](#technology-stack-and-architecture)
 - [Run the project locally](#run-the-project-locally)
@@ -67,6 +68,12 @@ The interface emphasizes self-awareness, user choice, and understandable explana
 - Optional suggestions linked to observed changes, with an explanation of what they are based on.
 - An interactive demo where sample records make the dashboard, comparisons, and recommendation flow easy to explore.
 
+### Additional reflection tools
+
+- **Weekly Wellness Report:** summarizes the last seven days of activity and self-reported ratings, compares available averages with the previous seven days, highlights the highest and lowest recorded stress-rating days, and surfaces up to three suggestions from the existing rule-based recommendation logic. It is descriptive, not a clinical assessment.
+- **Personal habit goals:** users can optionally set their own screen-time and daily-break targets. Progress uses only days with corresponding activity records; missing days are not counted as missed goals. No default target is imposed.
+- **Recommendation feedback:** users can mark an existing suggestion helpful or dismiss it. Feedback is saved locally per workspace, and dismissed suggestions can be restored. Feedback does not alter the analysis or create new recommendations.
+
 ### Workspace and interface controls
 
 - Separate **Explore demo** and **Personal** workspaces. Sample entries do not appear in personal charts or exports, and user entries do not alter the sample dataset.
@@ -110,7 +117,7 @@ Suggestions are selected by transparent rules and include supporting observation
 | React integration | `@vitejs/plugin-react` | React support in the Vite toolchain |
 | Data visualization | Recharts 3 | Responsive trend charts |
 | Icon system | Lucide React | Consistent interface icons |
-| Local persistence | Browser `localStorage` | Saves personal entries, profile name, and preferences on the current device |
+| Local persistence | Browser `localStorage` | Saves personal entries, profile name, goals, recommendation feedback, and preferences on the current device |
 | Illustrative data | Local TypeScript dataset | Populates the isolated demo workspace |
 | Code quality | Oxlint | Static linting through `npm run lint` |
 | Package management | npm | Dependency installation and project scripts |
